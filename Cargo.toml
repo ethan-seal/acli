@@ -2,11 +2,6 @@
 members = [
     "acli",
     "doc-parser",
-    "anki-wrapper",
-    "update-planner-parser",
 ]
 resolver = "2"
-default-members = [
-    "acli",
-    "doc-parser",
-]
+default-members = ["acli", "doc-parser"]
