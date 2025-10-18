@@ -1,16 +1,23 @@
-use thiserror::Error;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 
-#[derive(Error, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnkiWrapperError {
-    #[error("Deck not found: {name}")]
     DeckNotFound { name: String },
-
-    #[error("Invalid card format: {reason}")]
     InvalidCard { reason: String },
-
-    // Placeholder for future mapping to real Anki errors.
-    #[error("Anki collection error: {0}")]
     AnkiError(String),
 }
+
+impl Display for AnkiWrapperError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnkiWrapperError::DeckNotFound { name } => write!(f, "Deck not found: {}", name),
+            AnkiWrapperError::InvalidCard { reason } => write!(f, "Invalid card format: {}", reason),
+            AnkiWrapperError::AnkiError(msg) => write!(f, "Anki collection error: {}", msg),
+        }
+    }
+}
+
+impl Error for AnkiWrapperError {}
 
 pub type Result<T> = std::result::Result<T, AnkiWrapperError>;
