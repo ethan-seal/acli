@@ -2,3 +2,7 @@
 node_modules/
 target/
 **/*.rs.bk
+tmp-anki-ws/
+anki-wrapper/anki/.git/
+anki-wrapper/anki/*
+!anki-wrapper/anki/README.md

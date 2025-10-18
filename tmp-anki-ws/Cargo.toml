@@ -1,8 +1,0 @@
-[workspace]
-members = [
-    "anki-wrapper",
-]
-resolver = "2"
-
-[patch.'https://github.com/ankitects/anki']
-anki = { path = "anki/rslib" }
