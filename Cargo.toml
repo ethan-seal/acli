@@ -6,3 +6,7 @@ members = [
     "update-planner-parser",
 ]
 resolver = "2"
+default-members = [
+    "acli",
+    "doc-parser",
+]
