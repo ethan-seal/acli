@@ -1,5 +1,6 @@
 //! Error types for update planning.
 use core::fmt;
+use std::error::Error;
 
 /// Planning errors produced when generating sync plans.
 #[derive(Debug)]
@@ -21,3 +22,5 @@ impl fmt::Display for PlanError {
         }
     }
 }
+
+impl Error for PlanError {}
