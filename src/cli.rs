@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{ArgAction, Parser, Subcommand};
 
 use crate::error::CliError;
-use crate::output::SyncResult;
+use crate::output::CliOutput;
 use crate::sync::{AnkiCli, SyncConfig, ValidationConfig};
 
 #[derive(Debug, Parser)]
@@ -65,6 +65,7 @@ enum Commands {
 pub fn run() -> Result<(), CliError> {
     let args = Cli::parse();
     let cli = AnkiCli::new();
+    let output = CliOutput::default();
 
     match args.command {
         Commands::Sync {
@@ -78,10 +79,11 @@ pub fn run() -> Result<(), CliError> {
                 deck_name: deck,
                 anki_collection_path: collection,
                 recursive,
+                dry_run: false,
             };
 
             let result = cli.sync(&config)?;
-            print_sync_result(&result);
+            output.print_sync_result(&result);
             Ok(())
         }
         Commands::Preview {
@@ -94,10 +96,11 @@ pub fn run() -> Result<(), CliError> {
                 deck_name: deck,
                 anki_collection_path: None,
                 recursive,
+                dry_run: true,
             };
 
             let result = cli.preview(&config)?;
-            print_sync_result(&result);
+            output.print_sync_result(&result);
             Ok(())
         }
         Commands::Validate { source, recursive } => {
@@ -106,13 +109,9 @@ pub fn run() -> Result<(), CliError> {
                 recursive,
             };
 
-            cli.validate(&config)?;
-            println!("Validation completed successfully.");
+            let files_checked = cli.validate(&config)?;
+            output.print_validation_success(files_checked);
             Ok(())
         }
     }
-}
-
-fn print_sync_result(result: &SyncResult) {
-    println!("{result}");
 }

@@ -13,6 +13,9 @@ pub enum CliError {
     #[error("Directory traversal error: {0}")]
     WalkdirError(#[from] walkdir::Error),
 
+    #[error("Parse error: {0}")]
+    ParseError(#[from] crate::doc_parser::ParseError),
+
     #[error("feature not yet implemented")]
     NotImplemented,
 }
