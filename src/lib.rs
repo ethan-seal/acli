@@ -6,4 +6,4 @@ pub mod sync;
 
 pub use crate::cli::run;
 pub use crate::output::SyncResult;
-pub use crate::sync::{AnkiCli, SyncConfig};
+pub use crate::sync::{AnkiCli, SyncConfig, ValidationConfig};
