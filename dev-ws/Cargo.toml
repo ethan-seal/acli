@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "../anki-wrapper",
+]
+resolver = "2"
+
+# This workspace is intentionally minimal and only includes the local anki-wrapper.
+# anki-wrapper links to Anki via a path dependency at `anki-wrapper/anki/rslib` when
+# built with `--features real-anki`.
+
