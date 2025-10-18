@@ -13,6 +13,34 @@
     - syntax highlighting
 
 
+# Architecture Decisions
+
+## Dependencies Philosophy
+- Prefer minimal libraries over feature-rich ones
+- Consider no-std compatibility where possible to keep crates lightweight
+- Avoid unnecessary dependencies to reduce compilation time and binary size
+
+## Card Identification & Syncing
+- One-way sync: documents → Anki (documents are source of truth)
+- Card identification system will be implemented later (table for MVP)
+- For now, cards will be created fresh on each sync
+
+## Anki Integration
+- Use Anki's Rust APIs directly via git subrepo
+- Target default Anki collection initially
+- Deck assignment: hardcoded deck name passed to anki-wrapper with each card
+
+## Document Organization
+- Valid markdown files organized by deck/subject
+- Multiple documents and nested directories supported per subject
+- Multiple cards can be defined within each document
+- Directory structure does not automatically map to Anki deck structure
+
+## Error Handling Strategy
+- Parser failures: fail entire document (don't skip malformed cards)
+- Prefer explicit failures over silent data corruption
+
+
 # Starting tasks:
 - Create a subdirectory that is a rust library (call it anki-wrapper)
     - This will implement a simple library around anki that makes adding/updating/deleting cards easy
@@ -32,7 +60,19 @@
 - Then ask for my review of each planned part
 
 
-Examples for the parser:
+# Parser Behavior
+
+## Card Type Mapping
+- `<->` syntax creates bidirectional cards (maps to Anki's "Basic (and reversed card)")
+- `->` syntax creates basic cards (maps to Anki's "Basic" note type)
+- All parent context (background material) is preserved in question field
+
+## Processing Steps
+1. Parse markdown to AST
+2. Second pass: extract card syntax from AST
+3. Generate Card structs with preserved context
+
+## Examples for the parser:
 
 ---
 
