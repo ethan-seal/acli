@@ -56,6 +56,34 @@ impl AnkiCollection for DefaultAnkiCollection {
     }
 }
 
+// Feature-gated real-anki scaffolding for future implementation using the local subrepo.
+#[cfg(feature = "real-anki")]
+impl DefaultAnkiCollection {
+    #[allow(dead_code)]
+    pub fn ensure_deck_real(&mut self, _deck: &DeckConfig) -> Result<()> {
+        // TODO: use anki APIs to ensure deck exists
+        Err(AnkiWrapperError::AnkiError("real Anki ensure_deck not implemented".into()))
+    }
+
+    #[allow(dead_code)]
+    pub fn add_card_real(&mut self, _deck: &DeckConfig, _card: &Card) -> Result<()> {
+        // TODO: create appropriate note type & fields and add to collection
+        Err(AnkiWrapperError::AnkiError("real Anki add_card not implemented".into()))
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_deck_real(&mut self, _deck: &DeckConfig) -> Result<()> {
+        // TODO: locate deck and remove its cards
+        Err(AnkiWrapperError::AnkiError("real Anki clear_deck not implemented".into()))
+    }
+
+    #[allow(dead_code)]
+    pub fn save_real(&mut self) -> Result<()> {
+        // TODO: persist changes in collection
+        Err(AnkiWrapperError::AnkiError("real Anki save not implemented".into()))
+    }
+}
+
 #[derive(Default)]
 pub struct FakeAnkiCollection {
     pub decks: HashMap<String, Vec<Card>>,
