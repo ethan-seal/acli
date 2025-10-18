@@ -70,6 +70,9 @@ impl DocumentParser for MarkdownParser {
 }
 
 fn build_context_question(parents: &[String], current: &str) -> String {
+    if parents.is_empty() {
+        return current.to_string();
+    }
     let mut q = String::new();
     for (i, p) in parents.iter().enumerate() {
         let indent = "    ".repeat(i);

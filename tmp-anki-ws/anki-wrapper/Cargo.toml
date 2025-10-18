@@ -15,7 +15,7 @@ default = []
 real-anki = ["anki"]
 
 [dependencies]
-anki = { path = "anki/rslib", package = "anki", optional = true }
+anki = { git = "https://github.com/ankitects/anki", package = "anki", optional = true }
 
 [dev-dependencies]
 maplit = "1"
