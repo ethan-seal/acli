@@ -9,6 +9,10 @@ pub trait DocumentParser {
 
 pub struct MarkdownParser;
 
+impl MarkdownParser {
+    pub fn new() -> Self { Self }
+}
+
 impl DocumentParser for MarkdownParser {
     type Error = ParseError;
 
