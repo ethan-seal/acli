@@ -1,3 +1,4 @@
+//! Error types for update planning.
 use core::fmt;
 
 /// Planning errors produced when generating sync plans.
@@ -20,4 +21,3 @@ impl fmt::Display for PlanError {
         }
     }
 }
-

@@ -1,3 +1,4 @@
+//! Planner implementations for generating sync plans.
 use crate::error::PlanError;
 use crate::types::{DocumentSet, Operation, SyncPlan};
 
@@ -95,4 +96,3 @@ mod tests {
         assert!(matches!(result, Err(PlanError::InvalidDeckName(_))));
     }
 }
-

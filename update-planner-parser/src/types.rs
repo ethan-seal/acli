@@ -1,3 +1,4 @@
+//! Core data types used by the update planner.
 /// Card type variants used for planning.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CardType {
@@ -44,4 +45,3 @@ pub struct SyncPlan {
     /// Target deck name
     pub deck_name: String,
 }
-
