@@ -12,9 +12,10 @@ path = "src/lib.rs"
 [features]
 # Placeholder: real-anki would wire to the real Anki dependency when available
 default = []
-real-anki = []
+real-anki = ["anki"]
 
 [dependencies]
+anki = { git = "https://github.com/ankitects/anki", package = "anki", optional = true }
 
 [dev-dependencies]
 maplit = "1"

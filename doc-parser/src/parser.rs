@@ -1,15 +1,21 @@
+//! Parser traits and Markdown parser implementation.
 use crate::error::ParseError;
 use crate::types::{Card, CardType, ParsedDocument};
 
+/// Trait for parsing documents into cards.
 pub trait DocumentParser {
+    /// Error type returned by the parser.
     type Error: core::fmt::Debug + core::fmt::Display;
 
+    /// Parse a Markdown string into a parsed document containing cards.
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error>;
 }
 
+/// Parser that recognizes simple `->` and `<->` card syntax in Markdown.
 pub struct MarkdownParser;
 
 impl MarkdownParser {
+    /// Create a new Markdown parser instance.
     pub fn new() -> Self { Self }
 }
 

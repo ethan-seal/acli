@@ -12,11 +12,19 @@ pub trait AnkiCollection {
     fn save(&mut self) -> std::result::Result<(), Self::Error>;
 }
 
-pub struct DefaultAnkiCollection;
+pub struct DefaultAnkiCollection {
+    #[cfg(feature = "real-anki")]
+    _marker: std::marker::PhantomData<()>,
+}
 
 impl DefaultAnkiCollection {
-    pub fn new() -> Self {
-        Self
+    pub fn new() -> Self { Self { #[cfg(feature = "real-anki")] _marker: std::marker::PhantomData } }
+
+    #[cfg(feature = "real-anki")]
+    #[allow(dead_code)]
+    pub fn open_collection_path<P: AsRef<std::path::Path>>(_path: P) -> Result<Self> {
+        // TODO: Wire to anki::collection::Collection when implementing real backend
+        Ok(Self { _marker: std::marker::PhantomData })
     }
 }
 
@@ -90,4 +98,3 @@ impl AnkiCollection for FakeAnkiCollection {
         Ok(())
     }
 }
-
