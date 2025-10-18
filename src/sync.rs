@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
 
@@ -35,5 +36,17 @@ impl AnkiCli {
 
     pub fn validate(&self, _config: &ValidationConfig) -> Result<(), CliError> {
         Err(CliError::NotImplemented)
+    }
+
+    pub fn discover_files(
+        &self,
+        sources: &[PathBuf],
+        recursive: bool,
+    ) -> Result<Vec<PathBuf>, CliError> {
+        discovery::discover_markdown_files(sources, recursive)
+    }
+
+    pub fn is_markdown_file(&self, path: &Path) -> bool {
+        discovery::is_markdown_file(path)
     }
 }
