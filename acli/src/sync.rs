@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::discovery;
-use crate::doc_parser::{Card, DocumentParser, MarkdownParser};
+use doc_parser::{Card, DocumentParser, MarkdownParser};
 use crate::error::CliError;
 use crate::output::SyncResult;
 

@@ -2,5 +2,6 @@
 members = [
     "acli",
     "doc-parser",
+    "anki-wrapper",
 ]
 resolver = "2"

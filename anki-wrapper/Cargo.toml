@@ -1,0 +1,22 @@
+[package]
+name = "anki-wrapper"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Minimal wrapper trait + types for Anki operations, with a fake for testing."
+
+[lib]
+name = "anki_wrapper"
+path = "src/lib.rs"
+
+[features]
+# Placeholder: real-anki would wire to the real Anki dependency when available
+default = []
+real-anki = []
+
+[dependencies]
+thiserror = "1"
+
+[dev-dependencies]
+maplit = "1"
+anyhow = "1"

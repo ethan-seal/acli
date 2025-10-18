@@ -1,6 +1,5 @@
 pub mod cli;
 pub mod discovery;
-pub mod doc_parser;
 pub mod error;
 pub mod output;
 pub mod sync;
