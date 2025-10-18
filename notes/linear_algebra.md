@@ -1,0 +1,8 @@
+- unitary
+    - a rotation
+    - preserves inner product/lengths
+- complex conjugation
+- normal matrix
+    - complex conjugate times itself is commutative
+    - stronger than diagonalizable
+- diagonalizable
