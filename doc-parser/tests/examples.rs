@@ -25,3 +25,23 @@ fn test_bidirectional_card() {
     let result = parser.parse(input).unwrap();
     assert_eq!(result.cards, vec![expected]);
 }
+
+#[test]
+fn test_nested_context_list() {
+    let input = r#"
+- Background material
+    - hello -> world
+"#;
+
+    let expected = Card {
+        card_type: CardType::Basic,
+        fields: vec![
+            "- Background material\n    - hello -> ?".to_string(),
+            "world".to_string(),
+        ],
+    };
+
+    let parser = MarkdownParser::new();
+    let result = parser.parse(input).unwrap();
+    assert!(result.cards.contains(&expected));
+}
