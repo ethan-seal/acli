@@ -28,9 +28,7 @@ impl UpdatePlanner for SimplePlanner {
         if documents.cards.is_empty() {
             return Err(PlanError::EmptyDocumentSet);
         }
-        if deck_name.trim().is_empty() {
-            return Err(PlanError::InvalidDeckName(deck_name.to_string()));
-        }
+        validate_deck_name(deck_name)?;
 
         let operations = documents
             .cards
@@ -48,11 +46,21 @@ impl UpdatePlanner for SimplePlanner {
         deck_name: &str,
     ) -> Result<SyncPlan, Self::Error> {
         // Not implemented yet; return invalid deck name if applicable for consistency
-        if deck_name.trim().is_empty() {
-            return Err(PlanError::InvalidDeckName(deck_name.to_string()));
-        }
+        validate_deck_name(deck_name)?;
         Err(PlanError::DuplicateCards(0))
     }
+}
+
+fn validate_deck_name(deck_name: &str) -> Result<(), PlanError> {
+    let name = deck_name.trim();
+    if name.is_empty() {
+        return Err(PlanError::InvalidDeckName(deck_name.to_string()));
+    }
+    // Basic constraint: no path-like separators
+    if name.contains('/') || name.contains('\n') || name.contains('\r') {
+        return Err(PlanError::InvalidDeckName(deck_name.to_string()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -93,6 +101,17 @@ mod tests {
         };
         let planner = SimplePlanner;
         let result = planner.plan_fresh_sync(&doc_set, "   ");
+        assert!(matches!(result, Err(PlanError::InvalidDeckName(_))));
+    }
+
+    #[test]
+    fn test_invalid_deck_name_chars() {
+        let doc_set = DocumentSet {
+            cards: vec![Card { card_type: CardType::Basic, fields: vec!["Q".into(), "A".into()] }],
+            source_files: vec![],
+        };
+        let planner = SimplePlanner;
+        let result = planner.plan_fresh_sync(&doc_set, "foo/bar");
         assert!(matches!(result, Err(PlanError::InvalidDeckName(_))));
     }
 }
