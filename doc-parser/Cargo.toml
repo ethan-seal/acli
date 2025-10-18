@@ -9,5 +9,3 @@ path = "src/lib.rs"
 
 [dependencies]
 thiserror = "1.0"
-# Using pulldown-cmark initially for AST; can swap later
-pulldown-cmark = { version = "0.9", default-features = false }
