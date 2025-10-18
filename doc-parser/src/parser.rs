@@ -19,6 +19,10 @@ impl MarkdownParser {
     pub fn new() -> Self { Self }
 }
 
+impl Default for MarkdownParser {
+    fn default() -> Self { Self::new() }
+}
+
 impl DocumentParser for MarkdownParser {
     type Error = ParseError;
 

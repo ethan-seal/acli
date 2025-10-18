@@ -14,7 +14,7 @@ pub enum CliError {
     WalkdirError(#[from] walkdir::Error),
 
     #[error("Parse error: {0}")]
-    ParseError(#[from] crate::doc_parser::ParseError),
+    ParseError(#[from] doc_parser::ParseError),
 
     #[error("feature not yet implemented")]
     NotImplemented,
