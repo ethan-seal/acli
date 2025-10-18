@@ -4,7 +4,9 @@
 pub mod error;
 pub mod types;
 pub mod planner;
+pub mod executor;
 
 pub use crate::error::PlanError;
 pub use crate::types::{Operation, SyncPlan, DocumentSet};
 pub use crate::planner::{UpdatePlanner, SimplePlanner};
+pub use crate::executor::{PlanExecutor, DefaultExecutor};
