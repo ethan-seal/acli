@@ -20,3 +20,7 @@ anki = { path = "anki/rslib", package = "anki", optional = true }
 [dev-dependencies]
 maplit = "1"
 anyhow = "1"
+
+[[example]]
+name = "rslib_demo"
+required-features = ["real-anki"]

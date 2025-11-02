@@ -6,6 +6,10 @@ A minimal Rust library that wraps Anki's core functionality for creating, updati
 ## Core Types
 
 ```rust
+/// Opaque card identifier (wraps i64)
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct CardId(pub i64);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CardType {
     Basic,
@@ -16,6 +20,14 @@ pub enum CardType {
 pub struct Card {
     pub card_type: CardType,
     pub fields: Vec<String>, // [front, back] for Basic, [front, back] for BasicReversed
+}
+
+/// Information about a card in the collection
+#[derive(Debug, Clone)]
+pub struct CardInfo {
+    pub id: CardId,
+    pub card_type: CardType,
+    pub fields: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -30,17 +42,45 @@ pub struct DeckConfig {
 pub trait AnkiCollection {
     type Error: std::error::Error + Send + Sync + 'static;
 
+    // === Card Operations ===
+
     /// Add a card to the specified deck
     fn add_card(&mut self, deck: &DeckConfig, card: &Card) -> Result<(), Self::Error>;
+
+    /// Update an existing card's fields
+    fn update_card(&mut self, card_id: CardId, card: &Card) -> Result<(), Self::Error>;
+
+    /// Delete a specific card by ID
+    fn delete_card(&mut self, card_id: CardId) -> Result<(), Self::Error>;
+
+    /// Get all cards in a deck with their IDs and content
+    fn get_cards_in_deck(&self, deck: &DeckConfig) -> Result<Vec<CardInfo>, Self::Error>;
 
     /// Clear all cards from the specified deck (for fresh sync)
     fn clear_deck(&mut self, deck: &DeckConfig) -> Result<(), Self::Error>;
 
+    // === Deck Operations ===
+
     /// Ensure deck exists, create if necessary
     fn ensure_deck(&mut self, deck: &DeckConfig) -> Result<(), Self::Error>;
 
-    /// Save changes to the collection
-    fn save(&mut self) -> Result<(), Self::Error>;
+    /// Create a new deck (errors if deck already exists)
+    fn create_deck(&mut self, deck: &DeckConfig) -> Result<(), Self::Error>;
+
+    /// Delete a deck and all its cards
+    fn delete_deck(&mut self, deck: &DeckConfig) -> Result<(), Self::Error>;
+
+    /// Check if a deck exists
+    fn deck_exists(&self, deck: &DeckConfig) -> Result<bool, Self::Error>;
+
+    /// Rename a deck
+    fn rename_deck(&mut self, old_name: &str, new_name: &str) -> Result<(), Self::Error>;
+
+    /// Get all deck names in the collection
+    fn get_all_deck_names(&self) -> Result<Vec<String>, Self::Error>;
+
+    /// Move cards to a different deck
+    fn move_cards_to_deck(&mut self, card_ids: &[CardId], target_deck: &DeckConfig) -> Result<(), Self::Error>;
 }
 ```
 
@@ -87,6 +127,12 @@ impl AnkiCollection for FakeAnkiCollection {
 pub enum AnkiWrapperError {
     #[error("Deck not found: {name}")]
     DeckNotFound { name: String },
+
+    #[error("Deck already exists: {name}")]
+    DeckAlreadyExists { name: String },
+
+    #[error("Card not found: {id}")]
+    CardNotFound { id: CardId },
 
     #[error("Invalid card format: {reason}")]
     InvalidCard { reason: String },

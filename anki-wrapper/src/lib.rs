@@ -5,6 +5,6 @@ pub mod collection;
 mod tests;
 
 // Re-export core API for convenience
-pub use crate::types::{Card, CardType, DeckConfig};
+pub use crate::types::{Card, CardId, CardInfo, CardType, DeckConfig};
 pub use crate::collection::{AnkiCollection, DefaultAnkiCollection, FakeAnkiCollection};
 pub use crate::error::AnkiWrapperError;
