@@ -7,6 +7,8 @@ impl update_planner_parser::executor::AnkiCollection for MockCollection {
     fn ensure_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>> { println!("ensure_deck: {}", deck_name); Ok(()) }
     fn clear_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>> { println!("clear_deck: {}", deck_name); Ok(()) }
     fn add_card(&mut self, deck_name: &str, card: &update_planner_parser::types::Card) -> Result<(), Box<dyn std::error::Error>> { println!("add_card to {}: {:?}", deck_name, card); Ok(()) }
+    fn delete_card(&mut self, deck_name: &str, card_id: update_planner_parser::types::CardId) -> Result<(), Box<dyn std::error::Error>> { println!("delete_card from {}: {}", deck_name, card_id); Ok(()) }
+    fn update_card(&mut self, deck_name: &str, card_id: update_planner_parser::types::CardId, card: &update_planner_parser::types::Card) -> Result<(), Box<dyn std::error::Error>> { println!("update_card in {}: {} -> {:?}", deck_name, card_id, card); Ok(()) }
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>> { println!("save"); Ok(()) }
 }
 

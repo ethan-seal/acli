@@ -14,6 +14,10 @@ pub trait AnkiCollection {
     fn clear_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>>;
     /// Add a card to a deck.
     fn add_card(&mut self, deck_name: &str, card: &crate::types::Card) -> Result<(), Box<dyn std::error::Error>>;
+    /// Delete a card by its ID.
+    fn delete_card(&mut self, deck_name: &str, card_id: crate::types::CardId) -> Result<(), Box<dyn std::error::Error>>;
+    /// Update an existing card by ID.
+    fn update_card(&mut self, deck_name: &str, card_id: crate::types::CardId, card: &crate::types::Card) -> Result<(), Box<dyn std::error::Error>>;
     /// Persist changes.
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
@@ -36,8 +40,8 @@ impl PlanExecutor for DefaultExecutor {
         for op in &plan.operations {
             match op {
                 Operation::Add(card) => collection.add_card(deck, card)?,
-                Operation::Delete(_card_id) => return Err("Delete not implemented".into()),
-                Operation::Update(_card_id, _card) => return Err("Update not implemented".into()),
+                Operation::Delete(card_id) => collection.delete_card(deck, *card_id)?,
+                Operation::Update(card_id, card) => collection.update_card(deck, *card_id, card)?,
             }
         }
 
