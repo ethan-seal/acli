@@ -2,9 +2,10 @@
 members = [
     "acli",
     "doc-parser",
+    "update-planner-parser",
 ]
 exclude = [
     "anki-wrapper",
 ]
 resolver = "2"
-default-members = ["acli", "doc-parser"]
+default-members = ["acli", "doc-parser", "update-planner-parser"]

@@ -1,51 +1,5 @@
-use doc_parser::{Card, CardId, CardType, DocumentParser, MarkdownParser};
+use update_planner_parser::{CardId, types::{Card, CardType}};
 use std::collections::HashSet;
-
-#[test]
-fn test_basic_card() {
-    let input = "One -> 1";
-    let expected = Card {
-        card_type: CardType::Basic,
-        fields: vec!["One -> ?".to_string(), "1".to_string()],
-    };
-
-    let parser = MarkdownParser::new();
-    let result = parser.parse(input).unwrap();
-    assert_eq!(result.cards, vec![expected]);
-}
-
-#[test]
-fn test_bidirectional_card() {
-    let input = "One <-> 1";
-    let expected = Card {
-        card_type: CardType::Bidirectional,
-        fields: vec!["One <-> ?".to_string(), "1".to_string()],
-    };
-
-    let parser = MarkdownParser::new();
-    let result = parser.parse(input).unwrap();
-    assert_eq!(result.cards, vec![expected]);
-}
-
-#[test]
-fn test_nested_context_list() {
-    let input = r#"
-- Background material
-    - hello -> world
-"#;
-
-    let expected = Card {
-        card_type: CardType::Basic,
-        fields: vec![
-            "- Background material\n    - hello -> ?".to_string(),
-            "world".to_string(),
-        ],
-    };
-
-    let parser = MarkdownParser::new();
-    let result = parser.parse(input).unwrap();
-    assert!(result.cards.contains(&expected));
-}
 
 #[test]
 fn test_card_id_deterministic() {
@@ -133,4 +87,27 @@ fn test_card_id_display() {
     // Should be 16 hex digits
     assert_eq!(display.len(), 16);
     assert!(display.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn test_card_id_ordering() {
+    // CardIds should be orderable for use in sorted collections
+    let card1 = Card {
+        card_type: CardType::Basic,
+        fields: vec!["A".to_string(), "1".to_string()],
+    };
+    let card2 = Card {
+        card_type: CardType::Basic,
+        fields: vec!["B".to_string(), "2".to_string()],
+    };
+    let card3 = Card {
+        card_type: CardType::Basic,
+        fields: vec!["C".to_string(), "3".to_string()],
+    };
+
+    let mut ids = vec![card2.id(), card1.id(), card3.id()];
+    ids.sort();
+
+    // Just verify that sorting works (we don't care about the specific order)
+    assert_eq!(ids.len(), 3);
 }

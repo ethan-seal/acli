@@ -7,4 +7,4 @@ pub mod types;
 
 pub use crate::error::ParseError;
 pub use crate::parser::{DocumentParser, MarkdownParser};
-pub use crate::types::{Card, CardType, ParsedDocument};
+pub use crate::types::{Card, CardId, CardType, ParsedDocument};
