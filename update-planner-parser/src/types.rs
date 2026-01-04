@@ -60,10 +60,10 @@ impl Card {
 pub enum Operation {
     /// Add a new card
     Add(Card),
-    /// Delete by identifier (future)
-    Delete(String),
-    /// Update existing card (future)
-    Update(String, Card),
+    /// Delete a card by its ID
+    Delete(CardId),
+    /// Update an existing card by ID
+    Update(CardId, Card),
 }
 
 /// A set of parsed documents with extracted cards.
@@ -82,4 +82,87 @@ pub struct SyncPlan {
     pub operations: Vec<Operation>,
     /// Target deck name
     pub deck_name: String,
+}
+
+/// Result of comparing old vs new document state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentDiff {
+    /// Cards that exist in new but not in old (to be added)
+    pub added: Vec<Card>,
+    /// Cards that exist in old but not in new (to be deleted)
+    pub deleted: Vec<Card>,
+    /// Cards with same ID but different content (to be updated)
+    /// Note: With content-based hashing, this will be empty since
+    /// any content change produces a different CardId. This is here
+    /// for future extensibility if we switch to position-based IDs.
+    pub updated: Vec<(Card, Card)>, // (old, new)
+}
+
+impl DocumentDiff {
+    /// Compute the diff between an old and new document set.
+    pub fn compute(old: &DocumentSet, new: &DocumentSet) -> Self {
+        use std::collections::{HashMap, HashSet};
+
+        // Build maps of CardId -> Card for fast lookup
+        let old_map: HashMap<CardId, &Card> = old.cards.iter().map(|c| (c.id(), c)).collect();
+        let new_map: HashMap<CardId, &Card> = new.cards.iter().map(|c| (c.id(), c)).collect();
+
+        let old_ids: HashSet<CardId> = old_map.keys().copied().collect();
+        let new_ids: HashSet<CardId> = new_map.keys().copied().collect();
+
+        // Cards in new but not in old = added
+        let added: Vec<Card> = new_ids
+            .difference(&old_ids)
+            .filter_map(|id| new_map.get(id))
+            .map(|&c| c.clone())
+            .collect();
+
+        // Cards in old but not in new = deleted
+        let deleted: Vec<Card> = old_ids
+            .difference(&new_ids)
+            .filter_map(|id| old_map.get(id))
+            .map(|&c| c.clone())
+            .collect();
+
+        // Cards with same ID but different content = updated
+        // With content-based hashing, this should always be empty
+        // since any change in content creates a new CardId
+        let updated: Vec<(Card, Card)> = old_ids
+            .intersection(&new_ids)
+            .filter_map(|id| {
+                let old_card = old_map.get(id)?;
+                let new_card = new_map.get(id)?;
+                // If CardIds are the same but cards differ (shouldn't happen with current impl)
+                if old_card != new_card {
+                    Some(((*old_card).clone(), (*new_card).clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        DocumentDiff { added, deleted, updated }
+    }
+
+    /// Convert this diff into a list of operations.
+    pub fn to_operations(&self) -> Vec<Operation> {
+        let mut ops = Vec::new();
+
+        // Add all new cards
+        for card in &self.added {
+            ops.push(Operation::Add(card.clone()));
+        }
+
+        // Delete removed cards
+        for card in &self.deleted {
+            ops.push(Operation::Delete(card.id()));
+        }
+
+        // Update modified cards (should be empty with content-based IDs)
+        for (_old, new) in &self.updated {
+            ops.push(Operation::Update(new.id(), new.clone()));
+        }
+
+        ops
+    }
 }

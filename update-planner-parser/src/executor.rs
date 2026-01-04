@@ -36,8 +36,8 @@ impl PlanExecutor for DefaultExecutor {
         for op in &plan.operations {
             match op {
                 Operation::Add(card) => collection.add_card(deck, card)?,
-                Operation::Delete(_) => return Err("Delete not implemented".into()),
-                Operation::Update(_, _) => return Err("Update not implemented".into()),
+                Operation::Delete(_card_id) => return Err("Delete not implemented".into()),
+                Operation::Update(_card_id, _card) => return Err("Update not implemented".into()),
             }
         }
 
