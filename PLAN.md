@@ -12,7 +12,6 @@
     - Show errors when the parser is partially broken
     - syntax highlighting
 
-
 # Architecture Decisions
 
 ## Dependencies Philosophy
