@@ -16,6 +16,9 @@ pub enum CliError {
     #[error("Parse error: {0}")]
     ParseError(#[from] doc_parser::ParseError),
 
+    #[error("Plan error: {0}")]
+    PlanError(#[from] update_planner_parser::PlanError),
+
     #[error("feature not yet implemented")]
     NotImplemented,
 }

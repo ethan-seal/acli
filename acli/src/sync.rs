@@ -2,9 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::discovery;
-use doc_parser::{Card, DocumentParser, MarkdownParser};
 use crate::error::CliError;
 use crate::output::SyncResult;
+use doc_parser::{Card, DocumentParser, MarkdownParser};
+use update_planner_parser::{DocumentSet, SimplePlanner, SyncPlan, UpdatePlanner};
 
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -37,20 +38,24 @@ impl AnkiCli {
         let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
         let parsed = self.parse_documents(&markdown_files)?;
 
+        // Convert to DocumentSet and generate sync plan
+        let document_set = to_document_set(&parsed);
+        let plan = self.plan_sync(&document_set, &config.deck_name)?;
+
         if config.dry_run {
             return Ok(SyncResult::new(
                 markdown_files.len(),
-                parsed.cards.len(),
+                plan.operations.len(),
                 config.deck_name.clone(),
                 true,
             ));
         }
 
-        // TODO: wire into update planner and Anki collection once dependencies are available.
+        // TODO: Execute plan against Anki collection once executor is wired up.
 
         Ok(SyncResult::new(
             markdown_files.len(),
-            parsed.cards.len(),
+            plan.operations.len(),
             config.deck_name.clone(),
             false,
         ))
@@ -80,17 +85,49 @@ impl AnkiCli {
 
     fn parse_documents(&self, files: &[PathBuf]) -> Result<ParsedBatch, CliError> {
         let mut cards = Vec::new();
+        let mut source_files = Vec::new();
 
         for path in files {
             let content = fs::read_to_string(path)?;
             let parsed = self.parser.parse(&content)?;
             cards.extend(parsed.cards);
+            source_files.push(path.display().to_string());
         }
 
-        Ok(ParsedBatch { cards })
+        Ok(ParsedBatch {
+            cards,
+            source_files,
+        })
+    }
+
+    fn plan_sync(&self, document_set: &DocumentSet, deck_name: &str) -> Result<SyncPlan, CliError> {
+        let planner = SimplePlanner;
+        let plan = planner.plan_fresh_sync(document_set, deck_name)?;
+        Ok(plan)
     }
 }
 
 struct ParsedBatch {
     cards: Vec<Card>,
+    source_files: Vec<String>,
+}
+
+/// Convert a doc_parser::Card to an update_planner_parser::Card.
+fn convert_card(card: &Card) -> update_planner_parser::Card {
+    let card_type = match card.card_type {
+        doc_parser::CardType::Basic => update_planner_parser::CardType::Basic,
+        doc_parser::CardType::Bidirectional => update_planner_parser::CardType::Bidirectional,
+    };
+    update_planner_parser::Card {
+        card_type,
+        fields: card.fields.clone(),
+    }
+}
+
+/// Convert parsed cards to a DocumentSet for the planner.
+fn to_document_set(batch: &ParsedBatch) -> DocumentSet {
+    DocumentSet {
+        cards: batch.cards.iter().map(convert_card).collect(),
+        source_files: batch.source_files.clone(),
+    }
 }

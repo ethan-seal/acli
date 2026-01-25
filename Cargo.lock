@@ -10,6 +10,7 @@ dependencies = [
  "doc-parser",
  "tempfile",
  "thiserror",
+ "update-planner-parser",
  "walkdir",
 ]
 
