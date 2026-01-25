@@ -1,7 +1,6 @@
 //! Parser traits and Markdown parser implementation.
 use crate::error::ParseError;
 use crate::types::{Card, CardType, ParsedDocument};
-use pulldown_cmark::{Event, Parser, Tag};
 
 /// Trait for parsing documents into cards.
 pub trait DocumentParser {
