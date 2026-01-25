@@ -1,11 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::adapter::AnkiCollectionAdapter;
 use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
+use anki_wrapper::FakeAnkiCollection;
 use doc_parser::{Card, DocumentParser, MarkdownParser};
-use update_planner_parser::{DocumentSet, SimplePlanner, SyncPlan, UpdatePlanner};
+use update_planner_parser::{
+    DefaultExecutor, DocumentSet, PlanExecutor, SimplePlanner, SyncPlan, UpdatePlanner,
+};
 
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -51,7 +55,8 @@ impl AnkiCli {
             ));
         }
 
-        // TODO: Execute plan against Anki collection once executor is wired up.
+        // Execute plan against Anki collection
+        self.execute_plan(&plan, config)?;
 
         Ok(SyncResult::new(
             markdown_files.len(),
@@ -104,6 +109,42 @@ impl AnkiCli {
         let planner = SimplePlanner;
         let plan = planner.plan_fresh_sync(document_set, deck_name)?;
         Ok(plan)
+    }
+
+    fn execute_plan(&self, plan: &SyncPlan, config: &SyncConfig) -> Result<(), CliError> {
+        let executor = DefaultExecutor;
+
+        // Create the appropriate collection based on config
+        // For now, we use FakeAnkiCollection since real-anki feature requires
+        // building outside the workspace. When real-anki is enabled, this would
+        // use DefaultAnkiCollection::open_collection_path() instead.
+        #[cfg(feature = "real-anki")]
+        {
+            use anki_wrapper::DefaultAnkiCollection;
+            let collection = if let Some(path) = &config.anki_collection_path {
+                DefaultAnkiCollection::open_collection_path(path)
+                    .map_err(|e| CliError::AnkiError(e.to_string()))?
+            } else {
+                DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
+            };
+            let mut adapter = AnkiCollectionAdapter::new(collection);
+            executor
+                .execute_plan(plan, &mut adapter)
+                .map_err(|e| CliError::ExecutionError(e.to_string()))?;
+        }
+
+        #[cfg(not(feature = "real-anki"))]
+        {
+            // Without real-anki feature, we can only use FakeAnkiCollection
+            // This is useful for testing the pipeline without a real Anki installation
+            let _ = config; // suppress unused warning
+            let mut adapter = AnkiCollectionAdapter::new(FakeAnkiCollection::new());
+            executor
+                .execute_plan(plan, &mut adapter)
+                .map_err(|e| CliError::ExecutionError(e.to_string()))?;
+        }
+
+        Ok(())
     }
 }
 

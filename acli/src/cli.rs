@@ -65,7 +65,7 @@ enum Commands {
 pub fn run() -> Result<(), CliError> {
     let args = Cli::parse();
     let cli = AnkiCli::new();
-    let output = CliOutput::default();
+    let output = CliOutput;
 
     match args.command {
         Commands::Sync {

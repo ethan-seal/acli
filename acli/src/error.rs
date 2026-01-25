@@ -19,6 +19,12 @@ pub enum CliError {
     #[error("Plan error: {0}")]
     PlanError(#[from] update_planner_parser::PlanError),
 
+    #[error("Anki error: {0}")]
+    AnkiError(String),
+
+    #[error("Execution error: {0}")]
+    ExecutionError(String),
+
     #[error("feature not yet implemented")]
     NotImplemented,
 }

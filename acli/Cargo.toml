@@ -3,12 +3,18 @@ name = "acli"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# Enable real Anki backend. Requires building outside workspace or with cargo --manifest-path
+real-anki = ["anki-wrapper/real-anki"]
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 thiserror = "1.0"
 walkdir = "2.5"
 doc-parser = { path = "../doc-parser" }
 update-planner-parser = { path = "../update-planner-parser" }
+anki-wrapper = { path = "../anki-wrapper", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.10"

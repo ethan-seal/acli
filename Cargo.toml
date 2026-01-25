@@ -5,6 +5,7 @@ members = [
     "update-planner-parser",
 ]
 exclude = [
+    # Exclude anki-wrapper to avoid workspace conflict with its anki submodule
     "anki-wrapper",
 ]
 resolver = "2"
