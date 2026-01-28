@@ -8,7 +8,11 @@ pub trait UpdatePlanner {
     type Error: core::fmt::Debug + core::fmt::Display;
 
     /// Generate a fresh sync plan adding all cards to `deck_name`.
-    fn plan_fresh_sync(&self, documents: &DocumentSet, deck_name: &str) -> Result<SyncPlan, Self::Error>;
+    fn plan_fresh_sync(
+        &self,
+        documents: &DocumentSet,
+        deck_name: &str,
+    ) -> Result<SyncPlan, Self::Error>;
 
     /// Placeholder for future incremental planning.
     fn plan_incremental_sync(
@@ -24,7 +28,11 @@ pub struct SimplePlanner;
 impl UpdatePlanner for SimplePlanner {
     type Error = PlanError;
 
-    fn plan_fresh_sync(&self, documents: &DocumentSet, deck_name: &str) -> Result<SyncPlan, Self::Error> {
+    fn plan_fresh_sync(
+        &self,
+        documents: &DocumentSet,
+        deck_name: &str,
+    ) -> Result<SyncPlan, Self::Error> {
         if documents.cards.is_empty() {
             return Err(PlanError::EmptyDocumentSet);
         }
@@ -37,7 +45,10 @@ impl UpdatePlanner for SimplePlanner {
             .map(Operation::Add)
             .collect();
 
-        Ok(SyncPlan { operations, deck_name: deck_name.to_string() })
+        Ok(SyncPlan {
+            operations,
+            deck_name: deck_name.to_string(),
+        })
     }
 
     fn plan_incremental_sync(
@@ -71,11 +82,20 @@ mod tests {
     #[test]
     fn test_fresh_sync_plan() {
         let cards = vec![
-            Card { card_type: CardType::Basic, fields: vec!["Q".into(), "A".into()] },
-            Card { card_type: CardType::Bidirectional, fields: vec!["F".into(), "B".into()] },
+            Card {
+                card_type: CardType::Basic,
+                fields: vec!["Q".into(), "A".into()],
+            },
+            Card {
+                card_type: CardType::Bidirectional,
+                fields: vec!["F".into(), "B".into()],
+            },
         ];
 
-        let doc_set = DocumentSet { cards, source_files: vec!["test.md".into()] };
+        let doc_set = DocumentSet {
+            cards,
+            source_files: vec!["test.md".into()],
+        };
         let planner = SimplePlanner;
         let plan = planner.plan_fresh_sync(&doc_set, "TestDeck").unwrap();
 
@@ -87,7 +107,10 @@ mod tests {
 
     #[test]
     fn test_empty_document_set() {
-        let doc_set = DocumentSet { cards: vec![], source_files: vec![] };
+        let doc_set = DocumentSet {
+            cards: vec![],
+            source_files: vec![],
+        };
         let planner = SimplePlanner;
         let result = planner.plan_fresh_sync(&doc_set, "TestDeck");
         assert!(matches!(result, Err(PlanError::EmptyDocumentSet)));
@@ -96,7 +119,10 @@ mod tests {
     #[test]
     fn test_invalid_deck_name() {
         let doc_set = DocumentSet {
-            cards: vec![Card { card_type: CardType::Basic, fields: vec!["Q".into(), "A".into()] }],
+            cards: vec![Card {
+                card_type: CardType::Basic,
+                fields: vec!["Q".into(), "A".into()],
+            }],
             source_files: vec![],
         };
         let planner = SimplePlanner;
@@ -107,7 +133,10 @@ mod tests {
     #[test]
     fn test_invalid_deck_name_chars() {
         let doc_set = DocumentSet {
-            cards: vec![Card { card_type: CardType::Basic, fields: vec!["Q".into(), "A".into()] }],
+            cards: vec![Card {
+                card_type: CardType::Basic,
+                fields: vec!["Q".into(), "A".into()],
+            }],
             source_files: vec![],
         };
         let planner = SimplePlanner;

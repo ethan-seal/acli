@@ -1,4 +1,7 @@
-use update_planner_parser::{DocumentDiff, DocumentSet, Operation, types::{Card, CardType}};
+use update_planner_parser::{
+    types::{Card, CardType},
+    DocumentDiff, DocumentSet, Operation,
+};
 
 #[test]
 fn test_diff_empty_to_empty() {
@@ -185,8 +188,14 @@ fn test_diff_to_operations() {
     let ops = diff.to_operations();
 
     // Should have 1 add and 1 delete
-    let add_count = ops.iter().filter(|op| matches!(op, Operation::Add(_))).count();
-    let delete_count = ops.iter().filter(|op| matches!(op, Operation::Delete(_))).count();
+    let add_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Add(_)))
+        .count();
+    let delete_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Delete(_)))
+        .count();
 
     assert_eq!(add_count, 1);
     assert_eq!(delete_count, 1);
@@ -197,22 +206,18 @@ fn test_diff_content_change_creates_new_id() {
     // When a card's content changes, with content-based hashing,
     // it should be treated as delete old + add new, not an update
     let old = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Question".to_string(), "Answer".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Question".to_string(), "Answer".to_string()],
+        }],
         source_files: vec![],
     };
 
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Question".to_string(), "Modified Answer".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Question".to_string(), "Modified Answer".to_string()],
+        }],
         source_files: vec![],
     };
 
@@ -228,22 +233,18 @@ fn test_diff_content_change_creates_new_id() {
 fn test_diff_card_type_change() {
     // Changing card type should create a different ID
     let old = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Content".to_string(), "Answer".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Content".to_string(), "Answer".to_string()],
+        }],
         source_files: vec![],
     };
 
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Bidirectional,
-                fields: vec!["Content".to_string(), "Answer".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Bidirectional,
+            fields: vec!["Content".to_string(), "Answer".to_string()],
+        }],
         source_files: vec![],
     };
 
@@ -324,9 +325,18 @@ fn test_integration_complete_replacement() {
     assert_eq!(diff.deleted.len(), 2);
     assert!(diff.updated.is_empty());
 
-    let add_count = ops.iter().filter(|op| matches!(op, Operation::Add(_))).count();
-    let delete_count = ops.iter().filter(|op| matches!(op, Operation::Delete(_))).count();
-    let update_count = ops.iter().filter(|op| matches!(op, Operation::Update(_, _))).count();
+    let add_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Add(_)))
+        .count();
+    let delete_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Delete(_)))
+        .count();
+    let update_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Update(_, _)))
+        .count();
 
     assert_eq!(add_count, 2);
     assert_eq!(delete_count, 2);
@@ -365,17 +375,24 @@ fn test_integration_operations_from_empty_state() {
     }
 
     // Verify all added cards are present in operations
-    let added_cards: Vec<&Card> = ops.iter().filter_map(|op| {
-        match op {
+    let added_cards: Vec<&Card> = ops
+        .iter()
+        .filter_map(|op| match op {
             Operation::Add(card) => Some(card),
             _ => None,
-        }
-    }).collect();
+        })
+        .collect();
 
     assert_eq!(added_cards.len(), 3);
-    assert!(added_cards.iter().any(|c| c.fields == vec!["Question 1".to_string(), "Answer 1".to_string()]));
-    assert!(added_cards.iter().any(|c| c.fields == vec!["Question 2".to_string(), "Answer 2".to_string()]));
-    assert!(added_cards.iter().any(|c| c.fields == vec!["Term".to_string(), "Definition".to_string()]));
+    assert!(added_cards
+        .iter()
+        .any(|c| c.fields == vec!["Question 1".to_string(), "Answer 1".to_string()]));
+    assert!(added_cards
+        .iter()
+        .any(|c| c.fields == vec!["Question 2".to_string(), "Answer 2".to_string()]));
+    assert!(added_cards
+        .iter()
+        .any(|c| c.fields == vec!["Term".to_string(), "Definition".to_string()]));
 }
 
 #[test]
@@ -409,12 +426,13 @@ fn test_integration_operations_to_empty_state() {
     }
 
     // Verify all deleted card IDs correspond to original cards
-    let deleted_ids: Vec<_> = ops.iter().filter_map(|op| {
-        match op {
+    let deleted_ids: Vec<_> = ops
+        .iter()
+        .filter_map(|op| match op {
             Operation::Delete(id) => Some(id),
             _ => None,
-        }
-    }).collect();
+        })
+        .collect();
 
     assert_eq!(deleted_ids.len(), 3);
     for card in &old.cards {
@@ -469,8 +487,14 @@ fn test_integration_mixed_operations() {
     assert_eq!(diff.deleted.len(), 2);
     assert!(diff.updated.is_empty());
 
-    let add_count = ops.iter().filter(|op| matches!(op, Operation::Add(_))).count();
-    let delete_count = ops.iter().filter(|op| matches!(op, Operation::Delete(_))).count();
+    let add_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Add(_)))
+        .count();
+    let delete_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Delete(_)))
+        .count();
 
     assert_eq!(add_count, 2);
     assert_eq!(delete_count, 2);
@@ -519,22 +543,18 @@ fn test_integration_reordering_only() {
 fn test_integration_multiple_field_variations() {
     // Test with cards having different numbers of fields
     let old = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Q".to_string(), "A".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Q".to_string(), "A".to_string()],
+        }],
         source_files: vec![],
     };
 
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Q".to_string(), "A".to_string(), "Extra".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Q".to_string(), "A".to_string(), "Extra".to_string()],
+        }],
         source_files: vec![],
     };
 
@@ -552,22 +572,18 @@ fn test_integration_multiple_field_variations() {
 fn test_integration_whitespace_differences() {
     // Test that whitespace differences are treated as different cards
     let old = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Question".to_string(), "Answer".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Question".to_string(), "Answer".to_string()],
+        }],
         source_files: vec![],
     };
 
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Question".to_string(), "Answer ".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Question".to_string(), "Answer ".to_string()],
+        }],
         source_files: vec![],
     };
 
@@ -626,8 +642,14 @@ fn test_integration_large_batch_operations() {
     assert_eq!(diff.deleted.len(), 25);
     assert!(diff.updated.is_empty());
 
-    let add_count = ops.iter().filter(|op| matches!(op, Operation::Add(_))).count();
-    let delete_count = ops.iter().filter(|op| matches!(op, Operation::Delete(_))).count();
+    let add_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Add(_)))
+        .count();
+    let delete_count = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::Delete(_)))
+        .count();
 
     assert_eq!(add_count, 25);
     assert_eq!(delete_count, 25);
@@ -639,12 +661,10 @@ fn test_integration_operation_contains_correct_card_data() {
     // Verify that operations contain the actual card data, not just IDs
     let old = DocumentSet::default();
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Bidirectional,
-                fields: vec!["English".to_string(), "Spanish".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Bidirectional,
+            fields: vec!["English".to_string(), "Spanish".to_string()],
+        }],
         source_files: vec![],
     };
 
@@ -655,7 +675,10 @@ fn test_integration_operation_contains_correct_card_data() {
     match &ops[0] {
         Operation::Add(card) => {
             assert_eq!(card.card_type, CardType::Bidirectional);
-            assert_eq!(card.fields, vec!["English".to_string(), "Spanish".to_string()]);
+            assert_eq!(
+                card.fields,
+                vec!["English".to_string(), "Spanish".to_string()]
+            );
         }
         _ => panic!("Expected Add operation"),
     }
@@ -692,22 +715,18 @@ fn test_integration_delete_operation_has_correct_id() {
 fn test_integration_bidirectional_vs_basic_same_content() {
     // Ensure that same content with different card types produces different operations
     let old = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Basic,
-                fields: vec!["Front".to_string(), "Back".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Basic,
+            fields: vec!["Front".to_string(), "Back".to_string()],
+        }],
         source_files: vec![],
     };
 
     let new = DocumentSet {
-        cards: vec![
-            Card {
-                card_type: CardType::Bidirectional,
-                fields: vec!["Front".to_string(), "Back".to_string()],
-            },
-        ],
+        cards: vec![Card {
+            card_type: CardType::Bidirectional,
+            fields: vec!["Front".to_string(), "Back".to_string()],
+        }],
         source_files: vec![],
     };
 

@@ -141,7 +141,11 @@ impl DocumentDiff {
             })
             .collect();
 
-        DocumentDiff { added, deleted, updated }
+        DocumentDiff {
+            added,
+            deleted,
+            updated,
+        }
     }
 
     /// Convert this diff into a list of operations.

@@ -13,11 +13,24 @@ pub trait AnkiCollection {
     /// Remove all cards from the deck (fresh sync precondition).
     fn clear_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>>;
     /// Add a card to a deck.
-    fn add_card(&mut self, deck_name: &str, card: &crate::types::Card) -> Result<(), Box<dyn std::error::Error>>;
+    fn add_card(
+        &mut self,
+        deck_name: &str,
+        card: &crate::types::Card,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     /// Delete a card by its ID.
-    fn delete_card(&mut self, deck_name: &str, card_id: crate::types::CardId) -> Result<(), Box<dyn std::error::Error>>;
+    fn delete_card(
+        &mut self,
+        deck_name: &str,
+        card_id: crate::types::CardId,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     /// Update an existing card by ID.
-    fn update_card(&mut self, deck_name: &str, card_id: crate::types::CardId, card: &crate::types::Card) -> Result<(), Box<dyn std::error::Error>>;
+    fn update_card(
+        &mut self,
+        deck_name: &str,
+        card_id: crate::types::CardId,
+        card: &crate::types::Card,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     /// Persist changes.
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
@@ -25,14 +38,22 @@ pub trait AnkiCollection {
 /// Executes a `SyncPlan` against a collection.
 pub trait PlanExecutor {
     /// Execute a sync plan against an Anki-like collection.
-    fn execute_plan<C: AnkiCollection>(&self, plan: &SyncPlan, collection: &mut C) -> Result<(), Box<dyn std::error::Error>>;
+    fn execute_plan<C: AnkiCollection>(
+        &self,
+        plan: &SyncPlan,
+        collection: &mut C,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// Default implementation that performs a fresh sync: clears the deck then adds cards.
 pub struct DefaultExecutor;
 
 impl PlanExecutor for DefaultExecutor {
-    fn execute_plan<C: AnkiCollection>(&self, plan: &SyncPlan, collection: &mut C) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_plan<C: AnkiCollection>(
+        &self,
+        plan: &SyncPlan,
+        collection: &mut C,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let deck = &plan.deck_name;
         collection.ensure_deck(deck)?;
         collection.clear_deck(deck)?;
@@ -49,4 +70,3 @@ impl PlanExecutor for DefaultExecutor {
         Ok(())
     }
 }
-

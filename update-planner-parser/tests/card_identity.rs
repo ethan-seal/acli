@@ -1,5 +1,8 @@
-use update_planner_parser::{CardId, types::{Card, CardType}};
 use std::collections::HashSet;
+use update_planner_parser::{
+    types::{Card, CardType},
+    CardId,
+};
 
 #[test]
 fn test_card_id_deterministic() {

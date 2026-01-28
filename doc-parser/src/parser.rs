@@ -16,11 +16,15 @@ pub struct MarkdownParser;
 
 impl MarkdownParser {
     /// Create a new Markdown parser instance.
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 impl Default for MarkdownParser {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DocumentParser for MarkdownParser {
@@ -33,38 +37,66 @@ impl DocumentParser for MarkdownParser {
         let mut parents: Vec<String> = Vec::new();
         for (idx, raw) in markdown.lines().enumerate() {
             let line = raw.trim_end();
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
 
             // Determine indentation depth by counting leading spaces
             let leading_spaces = raw.chars().take_while(|c| *c == ' ').count();
             let is_list_item = line.trim_start().starts_with("- ");
             let depth = if is_list_item { leading_spaces / 4 } else { 0 };
-            let content = if is_list_item { line.trim_start().trim_start_matches("- ").trim() } else { line.trim() };
+            let content = if is_list_item {
+                line.trim_start().trim_start_matches("- ").trim()
+            } else {
+                line.trim()
+            };
 
             // Resize parents to current depth
-            if parents.len() > depth { parents.truncate(depth); }
-            if parents.len() < depth { parents.resize(depth, String::new()); }
+            if parents.len() > depth {
+                parents.truncate(depth);
+            }
+            if parents.len() < depth {
+                parents.resize(depth, String::new());
+            }
 
             if let Some((lhs, rhs)) = content.split_once("<->") {
                 let lhs = lhs.trim();
                 let rhs = rhs.trim();
                 let question = build_context_question(&parents, &format!("{} <-> ?", lhs));
-                doc.cards.push(Card { card_type: CardType::Bidirectional, fields: vec![question, rhs.to_string()] });
+                doc.cards.push(Card {
+                    card_type: CardType::Bidirectional,
+                    fields: vec![question, rhs.to_string()],
+                });
             } else if let Some((lhs, rhs)) = content.split_once("->") {
                 let lhs = lhs.trim();
                 let rhs = rhs.trim();
                 let question = build_context_question(&parents, &format!("{} -> ?", lhs));
-                doc.cards.push(Card { card_type: CardType::Basic, fields: vec![question, rhs.to_string()] });
+                doc.cards.push(Card {
+                    card_type: CardType::Basic,
+                    fields: vec![question, rhs.to_string()],
+                });
             } else if is_list_item {
                 // Update parent at this depth
-                if parents.len() == depth { parents.push(content.to_string()); } else { parents[depth] = content.to_string(); }
+                if parents.len() == depth {
+                    parents.push(content.to_string());
+                } else {
+                    parents[depth] = content.to_string();
+                }
             } else {
                 // Non-list line without arrows is invalid
-                return Err(ParseError::InvalidSyntax { line: idx + 1, column: 1, message: "Unrecognized line format".into() });
+                return Err(ParseError::InvalidSyntax {
+                    line: idx + 1,
+                    column: 1,
+                    message: "Unrecognized line format".into(),
+                });
             }
         }
 
-        if doc.cards.is_empty() { Err(ParseError::EmptyDocument) } else { Ok(doc) }
+        if doc.cards.is_empty() {
+            Err(ParseError::EmptyDocument)
+        } else {
+            Ok(doc)
+        }
     }
 }
 
