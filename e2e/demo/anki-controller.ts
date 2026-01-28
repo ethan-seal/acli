@@ -15,7 +15,7 @@ export async function waitForWindow(
 ): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const result = await $`xdotool search --name ${windowName}`.quiet();
+    const result = await $`xdotool search --name ${windowName}`.quiet().nothrow();
     if (result.exitCode === 0 && result.stdout.toString().trim()) {
       return true;
     }
@@ -25,7 +25,7 @@ export async function waitForWindow(
 }
 
 export async function getWindowId(windowName: string): Promise<string | null> {
-  const result = await $`xdotool search --name ${windowName}`.quiet();
+  const result = await $`xdotool search --name ${windowName}`.quiet().nothrow();
   if (result.exitCode === 0 && result.stdout.toString().trim()) {
     return result.stdout.toString().trim().split("\n")[0];
   }
@@ -33,7 +33,7 @@ export async function getWindowId(windowName: string): Promise<string | null> {
 }
 
 export async function focusWindow(windowId: string): Promise<boolean> {
-  const result = await $`xdotool windowactivate --sync ${windowId}`.quiet();
+  const result = await $`xdotool windowactivate --sync ${windowId}`.quiet().nothrow();
   await sleep(300);
   return result.exitCode === 0;
 }
@@ -43,14 +43,16 @@ export async function sendKeys(
   windowId?: string
 ): Promise<void> {
   if (windowId) {
-    await focusWindow(windowId);
+    // Send keys directly to the window
+    await $`xdotool key --window ${windowId} ${keys}`.quiet().nothrow();
+  } else {
+    await $`xdotool key ${keys}`.quiet().nothrow();
   }
-  await $`xdotool key ${keys}`.quiet();
-  await sleep(200);
+  await sleep(500);
 }
 
 export async function typeText(text: string): Promise<void> {
-  await $`xdotool type --clearmodifiers ${text}`.quiet();
+  await $`xdotool type --clearmodifiers ${text}`.quiet().nothrow();
   await sleep(200);
 }
 
@@ -60,17 +62,17 @@ export async function takeScreenshot(
 ): Promise<boolean> {
   // Ensure parent directory exists
   const dir = outputPath.substring(0, outputPath.lastIndexOf("/"));
-  await $`mkdir -p ${dir}`.quiet();
+  await $`mkdir -p ${dir}`.quiet().nothrow();
 
   if (windowId) {
     await focusWindow(windowId);
     await sleep(200);
     // Capture focused window
-    const result = await $`scrot -u -o ${outputPath}`.quiet();
+    const result = await $`scrot -u -o ${outputPath}`.quiet().nothrow();
     return result.exitCode === 0;
   } else {
     // Capture entire screen
-    const result = await $`scrot -o ${outputPath}`.quiet();
+    const result = await $`scrot -o ${outputPath}`.quiet().nothrow();
     return result.exitCode === 0;
   }
 }
@@ -131,21 +133,33 @@ export async function openBrowse(
     return false;
   }
 
-  await focusWindow(controller.mainWindowId);
-  await sleep(300);
+  // Try multiple times to open Browse
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await focusWindow(controller.mainWindowId);
+    await sleep(500);
 
-  // Ctrl+B opens Browse
-  await sendKeys("ctrl+b", controller.mainWindowId);
+    // Ctrl+B opens Browse - send it multiple ways for robustness
+    await $`xdotool key --window ${controller.mainWindowId} ctrl+b`.quiet().nothrow();
+    await sleep(500);
+    
+    // Also try sending to focused window
+    await $`xdotool key ctrl+b`.quiet().nothrow();
+    await sleep(1000);
 
-  // Wait for Browse window
-  if (!(await waitForWindow("Browse", 10000))) {
-    console.error("  ERROR: Browse window did not appear");
-    return false;
+    // Wait for Browse window
+    if (await waitForWindow("Browse", 5000)) {
+      await sleep(1000); // Let it fully render
+      controller.browseWindowId = await getWindowId("Browse");
+      if (controller.browseWindowId) {
+        return true;
+      }
+    }
+    
+    console.log(`  Attempt ${attempt + 1} failed, retrying...`);
   }
-
-  await sleep(1000); // Let it fully render
-  controller.browseWindowId = await getWindowId("Browse");
-  return controller.browseWindowId !== null;
+  
+  console.error("  ERROR: Browse window did not appear after 3 attempts");
+  return false;
 }
 
 export async function selectDeckInBrowse(

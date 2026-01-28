@@ -72,6 +72,26 @@ fi
 
 echo "Using acli binary: $ACLI_BINARY"
 
+# Patch the binary for container compatibility (NixOS builds have incompatible interpreter)
+ACLI_PATCHED="$PROJECT_ROOT/e2e/demo-output/acli-patched"
+mkdir -p "$(dirname "$ACLI_PATCHED")"
+
+# Check if we need to patch (NixOS binaries have /nix/store interpreter)
+if readelf -l "$ACLI_BINARY" 2>/dev/null | grep -q '/nix/store'; then
+    echo "Patching binary for container compatibility..."
+    if command -v patchelf &> /dev/null; then
+        cp "$ACLI_BINARY" "$ACLI_PATCHED"
+        patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 "$ACLI_PATCHED"
+        ACLI_BINARY="$ACLI_PATCHED"
+    elif command -v nix-shell &> /dev/null; then
+        cp "$ACLI_BINARY" "$ACLI_PATCHED"
+        nix-shell -p patchelf --run "patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 '$ACLI_PATCHED'"
+        ACLI_BINARY="$ACLI_PATCHED"
+    else
+        echo "WARNING: Binary may have incompatible interpreter. Install patchelf to fix."
+    fi
+fi
+
 # Check if container needs building
 if [ "$REBUILD_CONTAINER" = true ] || ! podman image exists acli-anki-e2e; then
     echo "Building demo container..."

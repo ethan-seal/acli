@@ -31,19 +31,13 @@ export const DEMO_SCENARIO: Scenario = {
       description: "Initial sync - Creating cards from markdown",
       changeSummary: "Starting fresh with 4 vocabulary cards",
       expectedCardCount: 4,
-      markdownContent: `# Spanish Vocabulary
-
-Learn common Spanish words with these flashcards.
-
-## Greetings
-
-- Hello <-> Hola
-- Goodbye <-> Adios
-
-## Numbers
-
-- One -> Uno
-- Two -> Dos
+      markdownContent: `- Spanish Vocabulary
+    - Greetings
+        - Hello <-> Hola
+        - Goodbye <-> Adios
+    - Numbers
+        - One -> Uno
+        - Two -> Dos
 `,
     },
     {
@@ -51,22 +45,16 @@ Learn common Spanish words with these flashcards.
       description: "Adding new cards",
       changeSummary: "Added 3 new cards: 'Three', 'Good morning', 'Good night'",
       expectedCardCount: 7,
-      markdownContent: `# Spanish Vocabulary
-
-Learn common Spanish words with these flashcards.
-
-## Greetings
-
-- Hello <-> Hola
-- Goodbye <-> Adios
-- Good morning <-> Buenos dias
-- Good night <-> Buenas noches
-
-## Numbers
-
-- One -> Uno
-- Two -> Dos
-- Three -> Tres
+      markdownContent: `- Spanish Vocabulary
+    - Greetings
+        - Hello <-> Hola
+        - Goodbye <-> Adios
+        - Good morning <-> Buenos dias
+        - Good night <-> Buenas noches
+    - Numbers
+        - One -> Uno
+        - Two -> Dos
+        - Three -> Tres
 `,
     },
     {
@@ -74,22 +62,16 @@ Learn common Spanish words with these flashcards.
       description: "Updating existing cards",
       changeSummary: "Updated 'Goodbye' answer to include 'Hasta luego'",
       expectedCardCount: 7,
-      markdownContent: `# Spanish Vocabulary
-
-Learn common Spanish words with these flashcards.
-
-## Greetings
-
-- Hello <-> Hola
-- Goodbye <-> Adios / Hasta luego
-- Good morning <-> Buenos dias
-- Good night <-> Buenas noches
-
-## Numbers
-
-- One -> Uno
-- Two -> Dos
-- Three -> Tres
+      markdownContent: `- Spanish Vocabulary
+    - Greetings
+        - Hello <-> Hola
+        - Goodbye <-> Adios / Hasta luego
+        - Good morning <-> Buenos dias
+        - Good night <-> Buenas noches
+    - Numbers
+        - One -> Uno
+        - Two -> Dos
+        - Three -> Tres
 `,
     },
     {
@@ -97,20 +79,14 @@ Learn common Spanish words with these flashcards.
       description: "Removing cards",
       changeSummary: "Removed 'Good night' and 'Three' cards",
       expectedCardCount: 5,
-      markdownContent: `# Spanish Vocabulary
-
-Learn common Spanish words with these flashcards.
-
-## Greetings
-
-- Hello <-> Hola
-- Goodbye <-> Adios / Hasta luego
-- Good morning <-> Buenos dias
-
-## Numbers
-
-- One -> Uno
-- Two -> Dos
+      markdownContent: `- Spanish Vocabulary
+    - Greetings
+        - Hello <-> Hola
+        - Goodbye <-> Adios / Hasta luego
+        - Good morning <-> Buenos dias
+    - Numbers
+        - One -> Uno
+        - Two -> Dos
 `,
     },
   ],

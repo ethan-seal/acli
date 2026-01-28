@@ -11,17 +11,7 @@ import { parseArgs } from "util";
 import { existsSync, mkdirSync } from "fs";
 import { $ } from "bun";
 
-import {
-  createAnkiController,
-  startAnki,
-  openBrowse,
-  selectDeckInBrowse,
-  screenshotBrowse,
-  closeBrowse,
-  stopAnki,
-  sleep,
-  type AnkiController,
-} from "./anki-controller";
+import { sleep } from "./anki-controller";
 import { DEMO_SCENARIO, type Phase } from "./scenario";
 import { saveReport, type DemoReport, type PhaseResult } from "./report";
 
@@ -85,37 +75,27 @@ async function takeScreenshots(
   const browsePath = `${config.screenshotsDir}/${phaseName}_browse.png`;
   const cardPaths: string[] = [];
 
-  const controller = createAnkiController(collectionPath);
+  // Get the collection directory (parent of collection.anki2)
+  const collectionDir = collectionPath.substring(0, collectionPath.lastIndexOf("/"));
 
+  console.log("  Taking screenshot using Python API...");
+  
   try {
-    console.log("  Starting Anki...");
-    if (!(await startAnki(controller))) {
-      console.log("  WARNING: Failed to start Anki");
-      return { browsePath: null, cardPaths };
-    }
-
-    console.log("  Opening Browse window...");
-    if (!(await openBrowse(controller))) {
-      console.log("  WARNING: Failed to open Browse");
-      await stopAnki(controller);
-      return { browsePath: null, cardPaths };
-    }
-
-    // Select the deck
-    await selectDeckInBrowse(controller, deckName);
-
-    console.log("  Taking Browse screenshot...");
-    if (await screenshotBrowse(controller, browsePath)) {
+    // Use the Python script that controls Anki internally
+    const result = await $`python3 /home/anki/demo/anki-screenshot.py \
+      --collection ${collectionDir} \
+      --deck ${deckName} \
+      --output ${browsePath} \
+      --timeout 12`.quiet().nothrow();
+    
+    if (result.exitCode === 0 && existsSync(browsePath)) {
       console.log(`  Saved: ${browsePath}`);
     } else {
-      console.log("  WARNING: Failed to take Browse screenshot");
+      console.log("  WARNING: Screenshot script failed");
+      console.log(`  Output: ${result.stdout.toString() + result.stderr.toString()}`);
     }
-
-    // Close Browse and Anki
-    await closeBrowse(controller);
-    console.log("  Closing Anki...");
-  } finally {
-    await stopAnki(controller);
+  } catch (e) {
+    console.log(`  WARNING: Screenshot error: ${e}`);
   }
 
   return {
