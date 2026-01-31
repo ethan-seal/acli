@@ -69,6 +69,8 @@ RUN apt-get update \
     openbox \
     # Process management
     procps \
+    # mpv for Anki audio (required even if unused)
+    mpv \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Bun

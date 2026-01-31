@@ -15,6 +15,9 @@ import { sleep } from "./anki-controller";
 import { DEMO_SCENARIO, type Phase } from "./scenario";
 import { saveReport, type DemoReport, type PhaseResult } from "./report";
 
+// Get the directory where this script is located
+const SCRIPT_DIR = import.meta.dir;
+
 interface Config {
   acliBinary: string;
   outputDir: string;
@@ -78,26 +81,66 @@ async function takeScreenshots(
   // Get the collection directory (parent of collection.anki2)
   const collectionDir = collectionPath.substring(0, collectionPath.lastIndexOf("/"));
 
-  console.log("  Taking screenshot using Python API...");
-  
-  try {
-    // Use the Python script that controls Anki internally
-    const result = await $`python3 /home/anki/demo/anki-screenshot.py \
-      --collection ${collectionDir} \
-      --deck ${deckName} \
-      --output ${browsePath} \
-      --timeout 12`.quiet().nothrow();
-    
-    if (result.exitCode === 0 && existsSync(browsePath)) {
-      console.log(`  Saved: ${browsePath}`);
-    } else {
-      console.log("  WARNING: Screenshot script failed");
-      console.log(`  Output: ${result.stdout.toString() + result.stderr.toString()}`);
+  // Find the Python screenshot script - check multiple locations
+  const scriptLocations = [
+    `${SCRIPT_DIR}/anki-screenshot.py`,           // Same directory as this script
+    "/home/anki/demo/anki-screenshot.py",          // Container path
+    `${process.cwd()}/e2e/demo/anki-screenshot.py`, // Project root
+  ];
+
+  let scriptPath: string | null = null;
+  for (const loc of scriptLocations) {
+    if (existsSync(loc)) {
+      scriptPath = loc;
+      break;
     }
-  } catch (e) {
-    console.log(`  WARNING: Screenshot error: ${e}`);
   }
 
+  if (!scriptPath) {
+    console.log("  ERROR: Could not find anki-screenshot.py");
+    console.log(`  Searched: ${scriptLocations.join(", ")}`);
+    return { browsePath: null, cardPaths };
+  }
+
+  // Retry logic for screenshot capture
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    console.log(`  Taking screenshot using Python API (attempt ${attempt}/${maxRetries})...`);
+
+    try {
+      // Use the Python script that controls Anki internally
+      console.log(`  Running: python3 ${scriptPath} --collection ${collectionDir} --deck "${deckName}" --output ${browsePath} --timeout 30`);
+      const result = await $`python3 -u ${scriptPath} \
+        --collection ${collectionDir} \
+        --deck ${deckName} \
+        --output ${browsePath} \
+        --timeout 30`.nothrow();
+
+      const output = result.stdout.toString() + result.stderr.toString();
+
+      if (result.exitCode === 0 && existsSync(browsePath)) {
+        console.log(`  Saved: ${browsePath}`);
+        return { browsePath, cardPaths };
+      } else {
+        console.log(`  Attempt ${attempt} failed (exit code: ${result.exitCode})`);
+        if (output.trim()) {
+          console.log(`  Output: ${output.substring(0, 500)}`);
+        }
+
+        if (attempt < maxRetries) {
+          console.log(`  Retrying in 2 seconds...`);
+          await sleep(2000);
+        }
+      }
+    } catch (e) {
+      console.log(`  Attempt ${attempt} error: ${e}`);
+      if (attempt < maxRetries) {
+        await sleep(2000);
+      }
+    }
+  }
+
+  console.log("  ERROR: All screenshot attempts failed");
   return {
     browsePath: existsSync(browsePath) ? browsePath : null,
     cardPaths,
