@@ -47,7 +47,17 @@ impl AnkiCollectionAdapter<FakeAnkiCollection> {
     }
 }
 
+/// Convert plain text to HTML for Anki display.
+/// Escapes HTML special characters and converts newlines to `<br>` tags.
+fn text_to_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\n', "<br>")
+}
+
 /// Convert a planner Card to an anki-wrapper Card.
+/// Field content is converted to HTML for proper multi-line display in Anki.
 fn convert_card(card: &PlannerCard) -> AnkiWrapperCard {
     let card_type = match card.card_type {
         PlannerCardType::Basic => AnkiWrapperCardType::Basic,
@@ -55,7 +65,7 @@ fn convert_card(card: &PlannerCard) -> AnkiWrapperCard {
     };
     AnkiWrapperCard {
         card_type,
-        fields: card.fields.clone(),
+        fields: card.fields.iter().map(|f| text_to_html(f)).collect(),
     }
 }
 
@@ -165,7 +175,43 @@ mod tests {
 
         let cards = &adapter.inner().decks["Test"];
         assert_eq!(cards.len(), 1);
+        // Fields are converted to HTML (no change for simple text without newlines)
         assert_eq!(cards[0].fields, vec!["front", "back"]);
+    }
+
+    #[test]
+    fn test_adapter_converts_newlines_to_html() {
+        let mut adapter = AnkiCollectionAdapter::fake();
+        adapter.ensure_deck("Test").unwrap();
+
+        let card = PlannerCard {
+            card_type: PlannerCardType::Basic,
+            fields: vec!["line1\nline2".to_string(), "answer".to_string()],
+        };
+        adapter.add_card("Test", &card).unwrap();
+
+        let cards = &adapter.inner().decks["Test"];
+        assert_eq!(cards.len(), 1);
+        // Newlines are converted to <br> for proper Anki display
+        assert_eq!(cards[0].fields[0], "line1<br>line2");
+        assert_eq!(cards[0].fields[1], "answer");
+    }
+
+    #[test]
+    fn test_adapter_escapes_html_special_chars() {
+        let mut adapter = AnkiCollectionAdapter::fake();
+        adapter.ensure_deck("Test").unwrap();
+
+        let card = PlannerCard {
+            card_type: PlannerCardType::Basic,
+            fields: vec!["x < y & y > z".to_string(), "true".to_string()],
+        };
+        adapter.add_card("Test", &card).unwrap();
+
+        let cards = &adapter.inner().decks["Test"];
+        assert_eq!(cards.len(), 1);
+        // HTML special characters are escaped
+        assert_eq!(cards[0].fields[0], "x &lt; y &amp; y &gt; z");
     }
 
     #[test]
