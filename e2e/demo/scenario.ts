@@ -93,6 +93,69 @@ export const DEMO_SCENARIO: Scenario = {
 };
 
 /**
+ * Parsed card from markdown.
+ */
+export interface ParsedCard {
+  front: string;
+  back: string;
+  type: "one-way" | "reversible";
+  path: string;
+}
+
+/**
+ * Parse flashcards from markdown content.
+ * Recognizes patterns like:
+ *   - Question -> Answer  (one-way)
+ *   - Question <-> Answer (reversible)
+ */
+export function parseCardsFromMarkdown(markdown: string): ParsedCard[] {
+  if (!markdown) return [];
+
+  const cards: ParsedCard[] = [];
+  const lines = markdown.split("\n");
+
+  // Track hierarchy path
+  const pathStack: string[] = [];
+
+  for (const line of lines) {
+    // Count indentation (assuming 4 spaces per level)
+    const stripped = line.replace(/^\s*-\s*/, "");
+    const indentMatch = line.match(/^(\s*)/);
+    const indent = indentMatch ? Math.floor(indentMatch[1].length / 4) : 0;
+
+    // Check for card patterns
+    const reversibleMatch = stripped.match(/^(.+?)\s*<->\s*(.+)$/);
+    const oneWayMatch = stripped.match(/^(.+?)\s*->\s*(.+)$/);
+
+    if (reversibleMatch) {
+      const path = pathStack.slice(0, indent).join("::");
+      cards.push({
+        front: reversibleMatch[1].trim(),
+        back: reversibleMatch[2].trim(),
+        type: "reversible",
+        path,
+      });
+    } else if (oneWayMatch) {
+      const path = pathStack.slice(0, indent).join("::");
+      cards.push({
+        front: oneWayMatch[1].trim(),
+        back: oneWayMatch[2].trim(),
+        type: "one-way",
+        path,
+      });
+    } else if (stripped.trim()) {
+      // It's a hierarchy node, update path stack
+      while (pathStack.length > indent) {
+        pathStack.pop();
+      }
+      pathStack[indent] = stripped.trim();
+    }
+  }
+
+  return cards;
+}
+
+/**
  * Generate a unified diff between two strings.
  */
 export function generateDiff(prev: string, current: string): string[] {
@@ -152,12 +215,12 @@ export function getDiffHtml(prev: string, current: string): string {
     } else if (line.startsWith("-")) {
       htmlParts.push(`<span class="diff-del">${escapeHtml(line)}</span>`);
     } else {
-      htmlParts.push(escapeHtml(line));
+      htmlParts.push(`<span class="diff-ctx">${escapeHtml(line)}</span>`);
     }
   }
 
   htmlParts.push("</pre>");
-  return htmlParts.join("\n");
+  return htmlParts.join("");
 }
 
 if (import.meta.main) {

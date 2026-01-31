@@ -408,7 +408,7 @@ def main():
                         print(f"Searching for: {search_query}", flush=True)
                         browser.search_for(search_query)
                         # Resize window to show more content
-                        browser.resize(1200, 800)
+                        browser.resize(1400, 900)
                         print("Browse window opened and filtered, waiting for search results...", flush=True)
 
                         def force_primary_render():
@@ -435,9 +435,53 @@ def main():
                             except Exception as e:
                                 print(f"Primary path render error: {e}", flush=True)
 
-                        # Delay to allow search, then force render, then mark ready
+                        def open_primary_preview():
+                            """Open card preview in primary browser path"""
+                            from aqt.qt import QApplication
+                            try:
+                                if hasattr(browser, 'onTogglePreview'):
+                                    browser.onTogglePreview()
+                                    print("Primary path: Opened preview via onTogglePreview()", flush=True)
+                                elif hasattr(browser, '_on_preview'):
+                                    browser._on_preview()
+                                    print("Primary path: Opened preview via _on_preview()", flush=True)
+                                elif hasattr(browser, 'form') and hasattr(browser.form, 'actionToggle_Preview'):
+                                    browser.form.actionToggle_Preview.trigger()
+                                    print("Primary path: Opened preview via actionToggle_Preview", flush=True)
+                                elif hasattr(browser, 'togglePreview'):
+                                    browser.togglePreview()
+                                    print("Primary path: Opened preview via togglePreview()", flush=True)
+                                else:
+                                    print("Primary path: No preview method found", flush=True)
+                                QApplication.processEvents()
+                                QApplication.processEvents()
+                            except Exception as e:
+                                print(f"Primary path: Could not open preview: {e}", flush=True)
+
+                        def take_primary_screenshot():
+                            """Take screenshot in primary browser path"""
+                            from aqt.qt import QApplication
+                            try:
+                                QApplication.processEvents()
+                                QApplication.processEvents()
+                                pixmap = browser.grab()
+                                if pixmap and not pixmap.isNull():
+                                    saved = pixmap.save(args.output, "PNG")
+                                    if saved:
+                                        print(f"Primary path: Screenshot saved: {args.output}", flush=True)
+                                        screenshot_taken[0] = True
+                                    else:
+                                        print("Primary path: Screenshot save failed", flush=True)
+                                else:
+                                    print("Primary path: grab() returned null pixmap", flush=True)
+                            except Exception as e:
+                                print(f"Primary path: Screenshot error: {e}", flush=True)
+
+                        # Delay to allow search, then force render, open preview, screenshot, then mark ready
                         QTimer.singleShot(1500, force_primary_render)
-                        QTimer.singleShot(2500, mark_browser_ready)
+                        QTimer.singleShot(2000, open_primary_preview)
+                        QTimer.singleShot(2500, take_primary_screenshot)
+                        QTimer.singleShot(3500, mark_browser_ready)
                     except Exception as e:
                         print(f"Error configuring browser: {e}", flush=True)
                         traceback.print_exc()
@@ -450,7 +494,7 @@ def main():
                         # First show all cards to populate the table
                         print("Showing all cards first...", flush=True)
                         browser.search_for("")  # Empty search shows all
-                        browser.resize(1200, 800)
+                        browser.resize(1400, 900)
                         browser.show()
 
                         # Then filter to the specific deck after a short delay
@@ -481,6 +525,53 @@ def main():
                                     print("Selected row 0 via view", flush=True)
                                 except Exception as e2:
                                     print(f"Alternative selection failed: {e2}", flush=True)
+
+                        def open_card_preview():
+                            """Open the card preview panel to show front/back of selected card"""
+                            from aqt.qt import QApplication
+                            try:
+                                # Method 1: Try the modern sidebar preview (Anki 2.1.x)
+                                if hasattr(browser, 'onTogglePreview'):
+                                    browser.onTogglePreview()
+                                    print("Opened preview via onTogglePreview()", flush=True)
+                                # Method 2: Try _on_preview (some versions)
+                                elif hasattr(browser, '_on_preview'):
+                                    browser._on_preview()
+                                    print("Opened preview via _on_preview()", flush=True)
+                                # Method 3: Try toggling via action (menu item)
+                                elif hasattr(browser, 'form') and hasattr(browser.form, 'actionToggle_Preview'):
+                                    browser.form.actionToggle_Preview.trigger()
+                                    print("Opened preview via actionToggle_Preview", flush=True)
+                                # Method 4: Try the sidebar toggle (Anki 24.x)
+                                elif hasattr(browser, 'togglePreview'):
+                                    browser.togglePreview()
+                                    print("Opened preview via togglePreview()", flush=True)
+                                # Method 5: Access previewer directly
+                                elif hasattr(browser, '_previewer'):
+                                    if browser._previewer is None:
+                                        from aqt.browser.previewer import BrowserPreviewer
+                                        browser._previewer = BrowserPreviewer(browser, browser.mw, lambda: browser.table.get_current_card())
+                                        browser._previewer.open()
+                                        print("Created and opened BrowserPreviewer", flush=True)
+                                    else:
+                                        browser._previewer.open()
+                                        print("Opened existing previewer", flush=True)
+                                else:
+                                    # Try keyboard shortcut simulation as last resort
+                                    from aqt.qt import QKeyEvent, Qt, QCoreApplication
+                                    # Ctrl+Shift+P is typically preview shortcut
+                                    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_P, 
+                                                     Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+                                    QCoreApplication.postEvent(browser, event)
+                                    print("Sent Ctrl+Shift+P key event for preview", flush=True)
+                                
+                                QApplication.processEvents()
+                                QApplication.processEvents()
+                                print("Card preview opened", flush=True)
+                            except Exception as e:
+                                print(f"Could not open card preview: {e}", flush=True)
+                                import traceback
+                                traceback.print_exc()
 
                         def force_table_render():
                             """Force the table to fully render its contents"""
@@ -560,12 +651,13 @@ def main():
 
                         QTimer.singleShot(500, apply_deck_filter)
                         QTimer.singleShot(1500, select_first_card)
-                        QTimer.singleShot(2000, force_table_render)
-                        # Take Qt screenshot after rendering
-                        QTimer.singleShot(2500, take_qt_screenshot)
+                        QTimer.singleShot(2000, open_card_preview)
+                        QTimer.singleShot(2500, force_table_render)
+                        # Take Qt screenshot after preview is open and rendered
+                        QTimer.singleShot(3000, take_qt_screenshot)
                         print("Browser opened via alternative method, waiting for search results...", flush=True)
                         # Delay marking ready to allow screenshot to complete
-                        QTimer.singleShot(3500, mark_browser_ready)
+                        QTimer.singleShot(4000, mark_browser_ready)
                     except Exception as e:
                         print(f"Alternative method failed: {e}", flush=True)
                         traceback.print_exc()

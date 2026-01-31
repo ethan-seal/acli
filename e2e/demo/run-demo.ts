@@ -12,8 +12,8 @@ import { existsSync, mkdirSync } from "fs";
 import { $ } from "bun";
 
 import { sleep } from "./anki-controller";
-import { DEMO_SCENARIO, type Phase } from "./scenario";
-import { saveReport, type DemoReport, type PhaseResult } from "./report";
+import { DEMO_SCENARIO, type Phase, parseCardsFromMarkdown } from "./scenario";
+import { saveReport, type DemoReport, type PhaseResult, type CardData } from "./report";
 
 // Get the directory where this script is located
 const SCRIPT_DIR = import.meta.dir;
@@ -66,6 +66,104 @@ async function runAcliSync(
       output: `ERROR: ${e}`,
       exitCode: 1,
     };
+  }
+}
+
+async function queryCards(
+  config: Config,
+  deckName: string,
+  prevMarkdown: string,
+  currentMarkdown: string
+): Promise<CardData[]> {
+  // Find the Python query script
+  const scriptLocations = [
+    `${SCRIPT_DIR}/anki-query-cards.py`,
+    "/home/anki/demo/anki-query-cards.py",
+    `${process.cwd()}/e2e/demo/anki-query-cards.py`,
+  ];
+
+  let scriptPath: string | null = null;
+  for (const loc of scriptLocations) {
+    if (existsSync(loc)) {
+      scriptPath = loc;
+      break;
+    }
+  }
+
+  if (!scriptPath) {
+    console.log("  WARNING: Could not find anki-query-cards.py");
+    return [];
+  }
+
+  // Get the collection directory
+  const collectionDir = config.collectionPath.substring(
+    0,
+    config.collectionPath.lastIndexOf("/")
+  );
+
+  try {
+    console.log(`  Querying cards from collection...`);
+    const result = await $`python3 ${scriptPath} \
+      --collection ${collectionDir} \
+      --deck ${deckName}`.quiet().nothrow();
+
+    if (result.exitCode !== 0) {
+      console.log(`  Card query failed: ${result.stderr.toString()}`);
+      return [];
+    }
+
+    const stdout = result.stdout.toString().trim();
+    if (!stdout) {
+      console.log("  No cards returned from query");
+      return [];
+    }
+
+    // Parse JSON output
+    const rawCards = JSON.parse(stdout) as Array<{
+      front: string;
+      back: string;
+      cardType: string;
+      deckPath: string;
+      tags: string;
+      cardId: number;
+      ordinal: number;
+    }>;
+
+    // Parse markdown to get expected cards and compute status
+    const prevCards = parseCardsFromMarkdown(prevMarkdown);
+    const currentCards = parseCardsFromMarkdown(currentMarkdown);
+
+    // Create lookup maps by front text
+    const prevByFront = new Map(prevCards.map((c) => [c.front, c]));
+    const currentByFront = new Map(currentCards.map((c) => [c.front, c]));
+
+    // Map query results to CardData with status
+    const cards: CardData[] = rawCards.map((raw) => {
+      const prev = prevByFront.get(raw.front);
+      const curr = currentByFront.get(raw.front);
+
+      let status: "added" | "updated" | "unchanged" | "deleted" = "unchanged";
+      if (!prev && curr) {
+        status = "added";
+      } else if (prev && curr && prev.back !== curr.back) {
+        status = "updated";
+      }
+      // Note: deleted cards won't appear in query results since they're removed
+
+      return {
+        front: raw.front,
+        back: raw.back,
+        cardType: raw.cardType === "reversible" ? "reversible" : "one-way",
+        path: raw.deckPath,
+        status,
+      };
+    });
+
+    console.log(`  Found ${cards.length} cards in collection`);
+    return cards;
+  } catch (e) {
+    console.log(`  Error querying cards: ${e}`);
+    return [];
   }
 }
 
@@ -182,6 +280,15 @@ async function runPhase(
     config.collectionPath
   );
 
+  // Query card data from collection
+  console.log("\nQuerying card data...");
+  const cards = await queryCards(
+    config,
+    DEMO_SCENARIO.deckName,
+    prevMarkdown,
+    phase.markdownContent
+  );
+
   return {
     phase,
     prevMarkdown,
@@ -190,6 +297,7 @@ async function runPhase(
     cliExitCode: exitCode,
     browseScreenshotPath: browsePath,
     cardScreenshotPaths: cardPaths,
+    cards,
     error: exitCode !== 0 ? output : null,
   };
 }

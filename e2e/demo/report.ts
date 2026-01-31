@@ -5,6 +5,14 @@ import { readFileSync, existsSync } from "fs";
 import type { Phase } from "./scenario";
 import { getDiffHtml } from "./scenario";
 
+export interface CardData {
+  front: string;
+  back: string;
+  cardType: "one-way" | "reversible";
+  path: string;
+  status: "added" | "updated" | "unchanged" | "deleted";
+}
+
 export interface PhaseResult {
   phase: Phase;
   prevMarkdown: string;
@@ -13,6 +21,7 @@ export interface PhaseResult {
   cliExitCode: number;
   browseScreenshotPath: string | null;
   cardScreenshotPaths: string[];
+  cards: CardData[];
   error: string | null;
 }
 
@@ -78,30 +87,73 @@ export function generateReport(report: DemoReport): string {
               <pre class="markdown-content">${escapeHtml(result.phase.markdownContent)}</pre>
             </div>`;
 
-      const screenshotsHtml =
-        result.browseScreenshotPath || result.cardScreenshotPaths.length > 0
-          ? `<div class="section">
-              <h3 class="section-title">Anki Screenshots</h3>
-              <div class="screenshots">
-                ${
-                  result.browseScreenshotPath
-                    ? `<div class="screenshot">
-                    <img src="${embedImage(result.browseScreenshotPath)}" alt="Browse Window">
-                    <div class="screenshot-caption">Browse Window - Card List</div>
-                  </div>`
-                    : ""
-                }
-                ${result.cardScreenshotPaths
-                  .map(
-                    (path, i) => `<div class="screenshot">
-                    <img src="${embedImage(path)}" alt="Card Preview ${i + 1}">
-                    <div class="screenshot-caption">Card Preview ${i + 1}</div>
-                  </div>`
-                  )
-                  .join("\n")}
-              </div>
-            </div>`
-          : "";
+      // Generate card table HTML
+      const cardTableHtml = result.cards.length > 0
+        ? `<table class="card-table">
+            <thead>
+              <tr>
+                <th>Front</th>
+                <th>Back</th>
+                <th>Type</th>
+                <th>Path</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${result.cards
+                .map(
+                  (card) => `<tr class="card-row card-status-${card.status}">
+                  <td class="card-front">${escapeHtml(card.front)}</td>
+                  <td class="card-back">${escapeHtml(card.back)}</td>
+                  <td class="card-type">${card.cardType === "reversible" ? "Reversible" : "One-way"}</td>
+                  <td class="card-path">${escapeHtml(card.path)}</td>
+                  <td class="card-status"><span class="status-pill status-${card.status}">${card.status}</span></td>
+                </tr>`
+                )
+                .join("\n")}
+            </tbody>
+          </table>`
+        : `<div class="no-cards">No cards in collection</div>`;
+
+      const hasScreenshots = result.browseScreenshotPath || result.cardScreenshotPaths.length > 0;
+      const hasCards = result.cards.length > 0;
+      const showTabs = hasScreenshots || hasCards;
+
+      const screenshotsContent = hasScreenshots
+        ? `<div class="screenshots">
+            ${
+              result.browseScreenshotPath
+                ? `<div class="screenshot">
+                <img src="${embedImage(result.browseScreenshotPath)}" alt="Browse Window">
+                <div class="screenshot-caption">Browse Window - Card List</div>
+              </div>`
+                : ""
+            }
+            ${result.cardScreenshotPaths
+              .map(
+                (path, i) => `<div class="screenshot">
+                <img src="${embedImage(path)}" alt="Card Preview ${i + 1}">
+                <div class="screenshot-caption">Card Preview ${i + 1}</div>
+              </div>`
+              )
+              .join("\n")}
+          </div>`
+        : `<div class="no-screenshots">No screenshots available</div>`;
+
+      const tabbedContentHtml = showTabs
+        ? `<div class="section">
+            <div class="tabs" data-phase="${phaseNum}">
+              <button class="tab-btn active" data-tab="screenshots-${phaseNum}">Screenshots</button>
+              <button class="tab-btn" data-tab="cards-${phaseNum}">Card Table</button>
+            </div>
+            <div class="tab-content active" id="screenshots-${phaseNum}">
+              ${screenshotsContent}
+            </div>
+            <div class="tab-content" id="cards-${phaseNum}">
+              ${cardTableHtml}
+            </div>
+          </div>`
+        : "";
 
       const errorHtml = result.error
         ? `<div class="section">
@@ -137,17 +189,22 @@ export function generateReport(report: DemoReport): string {
               </div>
             </div>
             
-            ${diffHtml}
-            
-            <div class="section">
-              <h3 class="section-title">CLI Execution</h3>
-              <div class="cli-output">
-                <div class="cli-command">${escapeHtml(result.cliCommand)}</div>
-                <div class="cli-result">${escapeHtml(result.cliOutput)}</div>
+            <div class="content-columns">
+              <div class="content-left">
+                ${diffHtml}
+                
+                <div class="section">
+                  <h3 class="section-title">CLI Execution</h3>
+                  <div class="cli-output">
+                    <div class="cli-command">${escapeHtml(result.cliCommand)}</div>
+                    <div class="cli-result">${escapeHtml(result.cliOutput)}</div>
+                  </div>
+                </div>
               </div>
+              
+              ${tabbedContentHtml ? `<div class="content-right">${tabbedContentHtml}</div>` : ""}
             </div>
             
-            ${screenshotsHtml}
             ${errorHtml}
           </div>
         </div>
@@ -185,7 +242,7 @@ export function generateReport(report: DemoReport): string {
       padding: 2rem;
     }
     
-    .container { max-width: 1200px; margin: 0 auto; }
+    .container { max-width: 1400px; margin: 0 auto; }
     
     header {
       text-align: center;
@@ -239,6 +296,24 @@ export function generateReport(report: DemoReport): string {
     
     .phase-content { padding: 1.5rem; }
     
+    .content-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    
+    .content-left {
+      min-width: 0;
+    }
+    
+    .content-right .section { margin-bottom: 0; }
+    .content-right .screenshots {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    
     .section { margin-bottom: 1.5rem; }
     .section:last-child { margin-bottom: 0; }
     
@@ -280,13 +355,14 @@ export function generateReport(report: DemoReport): string {
       white-space: pre;
     }
     
-    .diff-header { color: var(--text-secondary); font-weight: bold; }
+    .diff-header { color: var(--text-secondary); font-weight: bold; display: block; }
     .diff-add { color: var(--success); background: rgba(0, 210, 106, 0.1); display: block; }
     .diff-del { color: var(--error); background: rgba(255, 71, 87, 0.1); display: block; }
+    .diff-ctx { display: block; }
     
     .screenshots {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      display: flex;
+      flex-direction: column;
       gap: 1rem;
     }
     
@@ -352,9 +428,162 @@ export function generateReport(report: DemoReport): string {
       color: var(--text-secondary);
       font-size: 0.85rem;
     }
+    
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 0.75rem 1.5rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s ease;
+    }
+    
+    .tab-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    
+    .tab-content {
+      display: none;
+      padding-top: 1rem;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+    
+    /* Card Table */
+    .card-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    
+    .card-table th,
+    .card-table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .card-table th {
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+    }
+    
+    .card-table td {
+      color: var(--text-primary);
+    }
+    
+    .card-row:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    
+    .card-front {
+      font-weight: 500;
+    }
+    
+    .card-type {
+      color: var(--text-secondary);
+    }
+    
+    .card-path {
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+    }
+    
+    .status-pill {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .status-added {
+      background: rgba(0, 210, 106, 0.2);
+      color: var(--success);
+    }
+    
+    .status-updated {
+      background: rgba(255, 193, 7, 0.2);
+      color: var(--warning);
+    }
+    
+    .status-unchanged {
+      background: rgba(184, 184, 184, 0.15);
+      color: var(--text-secondary);
+    }
+    
+    .status-deleted {
+      background: rgba(255, 71, 87, 0.2);
+      color: var(--error);
+    }
+    
+    .card-status-added {
+      background: rgba(0, 210, 106, 0.05);
+    }
+    
+    .card-status-updated {
+      background: rgba(255, 193, 7, 0.05);
+    }
+    
+    .no-cards, .no-screenshots {
+      padding: 2rem;
+      text-align: center;
+      color: var(--text-secondary);
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Tab switching functionality
+      document.querySelectorAll('.tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var tabId = this.getAttribute('data-tab');
+          var tabsContainer = this.closest('.tabs');
+          var contentContainer = tabsContainer.parentElement;
+          
+          // Deactivate all tabs in this group
+          tabsContainer.querySelectorAll('.tab-btn').forEach(function(b) {
+            b.classList.remove('active');
+          });
+          
+          // Hide all content in this group
+          contentContainer.querySelectorAll('.tab-content').forEach(function(c) {
+            c.classList.remove('active');
+          });
+          
+          // Activate clicked tab and show its content
+          this.classList.add('active');
+          document.getElementById(tabId).classList.add('active');
+        });
+      });
+    });
+  </script>
   <div class="container">
     <header>
       <h1>${escapeHtml(report.title)}</h1>
