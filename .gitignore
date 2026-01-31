@@ -6,3 +6,4 @@ tmp-anki-ws/
 anki-wrapper/anki/.git/
 anki-wrapper/anki/*
 !anki-wrapper/anki/README.md
+__pycache__/
