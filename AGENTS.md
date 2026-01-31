@@ -23,6 +23,24 @@ This repository uses Codex CLI for agent-assisted development. Follow these rule
 
 These guidelines apply across the entire repository unless a deeper `AGENTS.md` overrides them.
 
+## E2E Demo Report
+
+Run the e2e demo regularly to verify the full sync workflow works correctly with Anki. This generates an HTML report with screenshots showing card creation, updates, and deletion.
+
+**To run:**
+```bash
+./e2e/run-demo.sh
+```
+
+**Output:** `e2e/demo-output/demo_report.html`
+
+Run this:
+- After significant changes to sync logic, card generation, or Anki integration
+- Before releases to verify end-to-end functionality
+- When debugging sync issues (the report shows exact CLI output and resulting cards)
+
+The demo runs in a container with a headless Anki instance, so no local Anki installation is required.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
