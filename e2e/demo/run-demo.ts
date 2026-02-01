@@ -12,7 +12,7 @@ import { existsSync, mkdirSync } from "fs";
 import { $ } from "bun";
 
 import { sleep } from "./anki-controller";
-import { DEMO_SCENARIO, type Phase, parseCardsFromMarkdown } from "./scenario";
+import { DEMO_SCENARIO, type Phase } from "./scenario";
 import { saveReport, type DemoReport, type PhaseResult, type CardData } from "./report";
 
 // Get the directory where this script is located
@@ -71,9 +71,7 @@ async function runAcliSync(
 
 async function queryCards(
   config: Config,
-  deckName: string,
-  prevMarkdown: string,
-  currentMarkdown: string
+  deckName: string
 ): Promise<CardData[]> {
   // Find the Python query script
   const scriptLocations = [
@@ -130,35 +128,13 @@ async function queryCards(
       question: string;
     }>;
 
-    // Parse markdown to get expected cards and compute status
-    const prevCards = parseCardsFromMarkdown(prevMarkdown);
-    const currentCards = parseCardsFromMarkdown(currentMarkdown);
-
-    // Create lookup maps by extracted question (not full front field)
-    const prevByQuestion = new Map(prevCards.map((c) => [c.front, c]));
-    const currentByQuestion = new Map(currentCards.map((c) => [c.front, c]));
-
-    // Map query results to CardData with status
-    const cards: CardData[] = rawCards.map((raw) => {
-      const prev = prevByQuestion.get(raw.question);
-      const curr = currentByQuestion.get(raw.question);
-
-      let status: "added" | "updated" | "unchanged" | "deleted" = "unchanged";
-      if (!prev && curr) {
-        status = "added";
-      } else if (prev && curr && prev.back !== curr.back) {
-        status = "updated";
-      }
-      // Note: deleted cards won't appear in query results since they're removed
-
-      return {
-        front: raw.front,
-        back: raw.back,
-        cardType: raw.cardType === "reversible" ? "reversible" : "one-way",
-        path: raw.deckPath,
-        status,
-      };
-    });
+    // Map query results to CardData
+    const cards: CardData[] = rawCards.map((raw) => ({
+      front: raw.front,
+      back: raw.back,
+      cardType: raw.cardType === "reversible" ? "reversible" : "one-way",
+      path: raw.deckPath,
+    }));
 
     console.log(`  Found ${cards.length} cards in collection`);
     return cards;
@@ -285,9 +261,7 @@ async function runPhase(
   console.log("\nQuerying card data...");
   const cards = await queryCards(
     config,
-    DEMO_SCENARIO.deckName,
-    prevMarkdown,
-    phase.markdownContent
+    DEMO_SCENARIO.deckName
   );
 
   return {

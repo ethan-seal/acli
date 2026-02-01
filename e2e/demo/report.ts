@@ -10,7 +10,6 @@ export interface CardData {
   back: string;
   cardType: "one-way" | "reversible";
   path: string;
-  status: "added" | "updated" | "unchanged" | "deleted";
 }
 
 export interface PhaseResult {
@@ -100,7 +99,7 @@ export function generateReport(report: DemoReport): string {
             <tbody>
               ${result.cards
                 .map(
-                  (card) => `<tr class="card-row card-status-${card.status}">
+                  (card) => `<tr class="card-row">
                   <td class="card-front"><div class="card-front-content">${card.front}</div></td>
                   <td class="card-back"><div class="card-back-content">${card.back}</div></td>
                   <td class="card-path-cell">
@@ -551,43 +550,6 @@ export function generateReport(report: DemoReport): string {
     .type-badge.type-one-way {
       background: rgba(138, 180, 248, 0.2);
       color: #8ab4f8;
-    }
-    
-    .status-pill {
-      display: inline-block;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-    
-    .status-added {
-      background: rgba(0, 210, 106, 0.2);
-      color: var(--success);
-    }
-    
-    .status-updated {
-      background: rgba(255, 193, 7, 0.2);
-      color: var(--warning);
-    }
-    
-    .status-unchanged {
-      background: rgba(184, 184, 184, 0.15);
-      color: var(--text-secondary);
-    }
-    
-    .status-deleted {
-      background: rgba(255, 71, 87, 0.2);
-      color: var(--error);
-    }
-    
-    .card-status-added {
-      background: rgba(0, 210, 106, 0.05);
-    }
-    
-    .card-status-updated {
-      background: rgba(255, 193, 7, 0.05);
     }
     
     .no-cards, .no-screenshots {
