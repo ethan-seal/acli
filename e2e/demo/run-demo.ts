@@ -127,20 +127,21 @@ async function queryCards(
       tags: string;
       cardId: number;
       ordinal: number;
+      question: string;
     }>;
 
     // Parse markdown to get expected cards and compute status
     const prevCards = parseCardsFromMarkdown(prevMarkdown);
     const currentCards = parseCardsFromMarkdown(currentMarkdown);
 
-    // Create lookup maps by front text
-    const prevByFront = new Map(prevCards.map((c) => [c.front, c]));
-    const currentByFront = new Map(currentCards.map((c) => [c.front, c]));
+    // Create lookup maps by extracted question (not full front field)
+    const prevByQuestion = new Map(prevCards.map((c) => [c.front, c]));
+    const currentByQuestion = new Map(currentCards.map((c) => [c.front, c]));
 
     // Map query results to CardData with status
     const cards: CardData[] = rawCards.map((raw) => {
-      const prev = prevByFront.get(raw.front);
-      const curr = currentByFront.get(raw.front);
+      const prev = prevByQuestion.get(raw.question);
+      const curr = currentByQuestion.get(raw.question);
 
       let status: "added" | "updated" | "unchanged" | "deleted" = "unchanged";
       if (!prev && curr) {

@@ -67,8 +67,10 @@ def strip_html(text: str) -> str:
     """Remove HTML tags from text."""
     if not text:
         return ""
-    # Remove HTML tags
-    clean = re.sub(r'<[^>]+>', '', text)
+    # Remove HTML tags, but preserve arrows like <-> and ->
+    # Match HTML tags: < followed by a letter/! (tag start), then anything, then >
+    # This won't match <-> or -> since they don't start with a letter
+    clean = re.sub(r'<[a-zA-Z!][^>]*>', '', text)
     # Decode common HTML entities
     clean = clean.replace('&nbsp;', ' ')
     clean = clean.replace('&amp;', '&')
@@ -347,9 +349,12 @@ def query_cards(collection_path: Path, deck_name: str) -> list[dict]:
             # Parse fields (separated by \x1f)
             fields = fields_str.split('\x1f')
             
-            # Get raw front and back fields
+            # Get raw front and back fields (keep HTML)
             raw_front = fields[0] if len(fields) > 0 else ""
-            raw_back = strip_html(fields[1]) if len(fields) > 1 else ""
+            raw_back = fields[1] if len(fields) > 1 else ""
+            
+            # For extracting question and path, we still need the text version
+            front_text = strip_html(raw_front)
             
             # Extract question and path from acli's front field format
             question, context_path = extract_question_from_front(raw_front)
@@ -376,13 +381,14 @@ def query_cards(collection_path: Path, deck_name: str) -> list[dict]:
             tags = tags_str.strip() if tags_str else ""
             
             cards.append({
-                "front": question,
+                "front": raw_front,
                 "back": raw_back,
                 "cardType": card_type,
                 "deckPath": path,
                 "tags": tags,
                 "cardId": card_id,
-                "ordinal": ord_num
+                "ordinal": ord_num,
+                "question": question  # Extracted question for comparison
             })
         
         return cards

@@ -48,12 +48,78 @@ impl AnkiCollectionAdapter<FakeAnkiCollection> {
 }
 
 /// Convert plain text to HTML for Anki display.
-/// Escapes HTML special characters and converts newlines to `<br>` tags.
+///
+/// Detects markdown-style hierarchical lists (lines starting with "- " with 4-space indentation)
+/// and converts them to nested HTML lists. Other text is escaped and newlines become `<br>`.
 fn text_to_html(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('\n', "<br>")
+    let lines: Vec<&str> = text.lines().collect();
+
+    // Check if this looks like a hierarchical markdown list
+    let is_markdown_list = lines.iter().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("- ")
+    });
+
+    if !is_markdown_list {
+        // Not a markdown list, just escape and convert newlines
+        return text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\n', "<br>");
+    }
+
+    // Convert markdown list to HTML
+    let mut html = String::new();
+    let mut depth_stack: Vec<usize> = Vec::new();
+
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Count leading spaces
+        let leading_spaces = line.chars().take_while(|c| *c == ' ').count();
+        let trimmed = line.trim_start();
+
+        if !trimmed.starts_with("- ") {
+            continue;
+        }
+
+        let depth = leading_spaces / 4;
+        let content = trimmed.trim_start_matches("- ");
+
+        // Escape the content
+        let escaped_content = content
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+
+        // Close lists if we've decreased depth
+        while depth_stack.len() > depth + 1 {
+            html.push_str("</ul>");
+            depth_stack.pop();
+        }
+
+        // Open new list if we've increased depth
+        if depth_stack.len() == depth {
+            html.push_str("<ul>");
+            depth_stack.push(depth);
+        }
+
+        // Add the list item
+        html.push_str("<li>");
+        html.push_str(&escaped_content);
+        html.push_str("</li>");
+    }
+
+    // Close all remaining open lists
+    while !depth_stack.is_empty() {
+        html.push_str("</ul>");
+        depth_stack.pop();
+    }
+
+    html
 }
 
 /// Convert a planner Card to an anki-wrapper Card.
@@ -228,6 +294,27 @@ mod tests {
 
         adapter.clear_deck("Test").unwrap();
         assert_eq!(adapter.inner().decks["Test"].len(), 0);
+    }
+
+    #[test]
+    fn test_adapter_converts_markdown_list_to_html() {
+        let mut adapter = AnkiCollectionAdapter::fake();
+        adapter.ensure_deck("Test").unwrap();
+
+        let hierarchical_front = "- Spanish\n    - Greetings\n        - Hello <-> ?";
+        let card = PlannerCard {
+            card_type: PlannerCardType::Bidirectional,
+            fields: vec![hierarchical_front.to_string(), "Hola".to_string()],
+        };
+        adapter.add_card("Test", &card).unwrap();
+
+        let cards = &adapter.inner().decks["Test"];
+        assert_eq!(cards.len(), 1);
+
+        // The front field should be converted to nested HTML lists
+        let expected_html = "<ul><li>Spanish</li><ul><li>Greetings</li><ul><li>Hello &lt;-&gt; ?</li></ul></ul></ul>";
+        assert_eq!(cards[0].fields[0], expected_html);
+        assert_eq!(cards[0].fields[1], "Hola");
     }
 
     #[test]

@@ -94,20 +94,19 @@ export function generateReport(report: DemoReport): string {
               <tr>
                 <th>Front</th>
                 <th>Back</th>
-                <th>Type</th>
                 <th>Path</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               ${result.cards
                 .map(
                   (card) => `<tr class="card-row card-status-${card.status}">
-                  <td class="card-front">${escapeHtml(card.front)}</td>
-                  <td class="card-back">${escapeHtml(card.back)}</td>
-                  <td class="card-type">${card.cardType === "reversible" ? "Reversible" : "One-way"}</td>
-                  <td class="card-path">${escapeHtml(card.path)}</td>
-                  <td class="card-status"><span class="status-pill status-${card.status}">${card.status}</span></td>
+                  <td class="card-front"><div class="card-front-content">${card.front}</div></td>
+                  <td class="card-back"><div class="card-back-content">${card.back}</div></td>
+                  <td class="card-path-cell">
+                    <div class="card-path">${escapeHtml(card.path)}</div>
+                    <span class="type-badge type-${card.cardType}">${card.cardType === "reversible" ? "Reversible" : "One-way"}</span>
+                  </td>
                 </tr>`
                 )
                 .join("\n")}
@@ -503,13 +502,55 @@ export function generateReport(report: DemoReport): string {
       font-weight: 500;
     }
     
-    .card-type {
-      color: var(--text-secondary);
+    .card-front-content {
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+    
+    .card-front-content ul {
+      margin: 0;
+      padding-left: 1.5rem;
+      list-style-type: disc;
+    }
+    
+    .card-front-content li {
+      margin: 0.25rem 0;
+    }
+    
+    .card-back-content {
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+    
+    .card-path-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
     }
     
     .card-path {
       color: var(--text-secondary);
       font-size: 0.8rem;
+    }
+    
+    .type-badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      width: fit-content;
+    }
+    
+    .type-badge.type-reversible {
+      background: rgba(138, 138, 255, 0.2);
+      color: #8a8aff;
+    }
+    
+    .type-badge.type-one-way {
+      background: rgba(138, 180, 248, 0.2);
+      color: #8ab4f8;
     }
     
     .status-pill {

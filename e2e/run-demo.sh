@@ -56,27 +56,64 @@ if [ "$BUILD_ACLI" = true ]; then
     
     ACLI_BINARY="$PROJECT_ROOT/anki-wrapper/target/release/acli"
 else
-    # Look for existing binary
-    if [ -f "$PROJECT_ROOT/target/release/acli" ]; then
-        ACLI_BINARY="$PROJECT_ROOT/target/release/acli"
-    elif [ -f "$PROJECT_ROOT/anki-wrapper/target/release/acli" ]; then
+    # Look for existing binary - prefer anki-wrapper binary (has real-anki feature)
+    if [ -f "$PROJECT_ROOT/anki-wrapper/target/release/acli" ]; then
         ACLI_BINARY="$PROJECT_ROOT/anki-wrapper/target/release/acli"
+    elif [ -f "$PROJECT_ROOT/target/release/acli" ]; then
+        ACLI_BINARY="$PROJECT_ROOT/target/release/acli"
     else
         echo "ERROR: acli binary not found."
         echo "Either build it with --build-acli or ensure it exists at:"
-        echo "  $PROJECT_ROOT/target/release/acli"
         echo "  $PROJECT_ROOT/anki-wrapper/target/release/acli"
+        echo "  $PROJECT_ROOT/target/release/acli"
         exit 1
     fi
 fi
 
-echo "Using acli binary: $ACLI_BINARY"
+# Verify the binary has real-anki feature by testing if it creates a collection
+echo "Verifying acli binary has real-anki feature..."
+TEST_DIR=$(mktemp -d)
+mkdir -p "$TEST_DIR/content" "$TEST_DIR/collection"
+echo '- Test
+  - Hello <-> World' > "$TEST_DIR/content/test.md"
+"$ACLI_BINARY" sync --source "$TEST_DIR/content" --deck Test --collection "$TEST_DIR/collection/collection.anki2" >/dev/null 2>&1
+
+if [ ! -f "$TEST_DIR/collection/collection.anki2" ]; then
+    rm -rf "$TEST_DIR"
+    echo
+    echo "ERROR: The acli binary does not have the 'real-anki' feature enabled."
+    echo "It cannot write to actual Anki collections."
+    echo
+    echo "To fix this, run with --build-acli to build with the real-anki feature:"
+    echo "  ./e2e/run-demo.sh --build-acli"
+    echo
+    echo "Note: First build takes 30+ minutes to compile the Anki library."
+    exit 1
+fi
+rm -rf "$TEST_DIR"
+echo "Binary verified: real-anki feature is enabled."
+
+# Check if container needs building
+if [ "$REBUILD_CONTAINER" = true ] || ! podman image exists acli-anki-e2e; then
+    echo "Building demo container..."
+    ./e2e/build.sh
+fi
+
+# Clean and create output directory structure
+# Files from previous runs may be owned by container user, so use podman to remove them
+if [ -d "$OUTPUT_DIR" ]; then
+    echo "Cleaning previous output..."
+    podman unshare rm -rf "$OUTPUT_DIR" 2>/dev/null || rm -rf "$OUTPUT_DIR" 2>/dev/null || true
+fi
+mkdir -p "$OUTPUT_DIR/screenshots"
+mkdir -p "$OUTPUT_DIR/content"
+mkdir -p "$OUTPUT_DIR/anki_collection"
+chmod -R 777 "$OUTPUT_DIR"
 
 # Patch the binary for container compatibility (NixOS builds have incompatible interpreter)
-ACLI_PATCHED="$PROJECT_ROOT/e2e/demo-output/acli-patched"
-mkdir -p "$(dirname "$ACLI_PATCHED")"
+# Must happen AFTER cleaning output directory since patched binary is stored there
+ACLI_PATCHED="$OUTPUT_DIR/acli-patched"
 
-# Check if we need to patch (NixOS binaries have /nix/store interpreter)
 if readelf -l "$ACLI_BINARY" 2>/dev/null | grep -q '/nix/store'; then
     echo "Patching binary for container compatibility..."
     if command -v patchelf &> /dev/null; then
@@ -92,14 +129,7 @@ if readelf -l "$ACLI_BINARY" 2>/dev/null | grep -q '/nix/store'; then
     fi
 fi
 
-# Check if container needs building
-if [ "$REBUILD_CONTAINER" = true ] || ! podman image exists acli-anki-e2e; then
-    echo "Building demo container..."
-    ./e2e/build.sh
-fi
-
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
+echo "Using acli binary: $ACLI_BINARY"
 
 # Run the demo in the container using Bun/TypeScript
 echo
