@@ -5,6 +5,7 @@ use crate::adapter::AnkiCollectionAdapter;
 use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
+#[cfg(not(feature = "real-anki"))]
 use anki_wrapper::FakeAnkiCollection;
 use doc_parser::{Card, DocumentParser, MarkdownParser};
 use update_planner_parser::{

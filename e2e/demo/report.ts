@@ -4,6 +4,7 @@
 import { readFileSync, existsSync } from "fs";
 import type { Phase } from "./scenario";
 import { getDiffHtml } from "./scenario";
+import { getCardDiffHtml } from "./card-diff";
 
 export interface CardData {
   front: string;
@@ -75,16 +76,27 @@ export function generateReport(report: DemoReport): string {
       const statusText =
         result.error || result.cliExitCode !== 0 ? "Error" : "Success";
 
-      const diffHtml =
+      // Show both markdown-level and card-level diffs
+      const markdownDiffHtml =
         phaseNum > 1
           ? `<div class="section">
-              <h3 class="section-title">Markdown Changes</h3>
-              ${getDiffHtml(result.prevMarkdown, result.phase.markdownContent)}
+              <h3 class="section-title">Markdown Changes (Text Level)</h3>
+              <details>
+                <summary style="cursor: pointer; padding: 0.5rem 0; color: var(--text-secondary);">
+                  Show line-by-line markdown diff
+                </summary>
+                ${getDiffHtml(result.prevMarkdown, result.phase.markdownContent)}
+              </details>
             </div>`
           : `<div class="section">
               <h3 class="section-title">Initial Markdown Content</h3>
               <pre class="markdown-content">${escapeHtml(result.phase.markdownContent)}</pre>
             </div>`;
+
+      const cardDiffHtml = `<div class="section">
+        <h3 class="section-title">Card-Level Changes (Sync Operations)</h3>
+        ${getCardDiffHtml(result.prevMarkdown, result.phase.markdownContent)}
+      </div>`;
 
       // Generate card table HTML
       const cardTableHtml = result.cards.length > 0
@@ -189,7 +201,9 @@ export function generateReport(report: DemoReport): string {
             
             <div class="content-columns">
               <div class="content-left">
-                ${diffHtml}
+                ${cardDiffHtml}
+                
+                ${markdownDiffHtml}
                 
                 <div class="section">
                   <h3 class="section-title">CLI Execution</h3>
@@ -353,10 +367,57 @@ export function generateReport(report: DemoReport): string {
       white-space: pre;
     }
     
-    .diff-header { color: var(--text-secondary); font-weight: bold; display: block; }
-    .diff-add { color: var(--success); background: rgba(0, 210, 106, 0.1); display: block; }
-    .diff-del { color: var(--error); background: rgba(255, 71, 87, 0.1); display: block; }
-    .diff-ctx { display: block; }
+    .diff-header { 
+      color: var(--text-secondary); 
+      font-weight: bold; 
+      display: block; 
+      padding: 0.25rem 0;
+    }
+    .diff-add { 
+      color: var(--success); 
+      background: rgba(0, 210, 106, 0.1); 
+      display: block;
+      padding: 0.1rem 0.5rem;
+      margin: 0.1rem 0;
+      border-left: 3px solid var(--success);
+    }
+    .diff-del { 
+      color: var(--error); 
+      background: rgba(255, 71, 87, 0.1); 
+      display: block;
+      padding: 0.1rem 0.5rem;
+      margin: 0.1rem 0;
+      border-left: 3px solid var(--error);
+    }
+    .diff-ctx { 
+      display: block;
+      color: var(--text-secondary);
+      padding: 0.1rem 0.5rem;
+    }
+    
+    /* Card-level diff styling */
+    .card-diff {
+      border: 2px solid var(--accent);
+      background: rgba(233, 69, 96, 0.05);
+    }
+    
+    .card-diff .diff-header {
+      color: var(--accent);
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    details {
+      margin-top: 0.5rem;
+    }
+    
+    details summary {
+      user-select: none;
+    }
+    
+    details[open] summary {
+      margin-bottom: 0.5rem;
+    }
     
     .screenshots {
       display: flex;

@@ -2,15 +2,14 @@
 # Run the acli demo in the container and generate a report
 #
 # This script:
-# 1. Optionally builds acli with real-anki feature
+# 1. Builds acli with real-anki feature
 # 2. Builds the demo container if needed
 # 3. Runs the demo inside the container (TypeScript/Bun)
-# 4. Copies the report to the host
+# 4. Generates an HTML report with screenshots
 #
 # Usage:
-#   ./e2e/run-demo.sh                    # Use existing acli binary
-#   ./e2e/run-demo.sh --build-acli       # Build acli first (slow!)
-#   ./e2e/run-demo.sh --rebuild-container # Rebuild the container
+#   ./e2e/run-demo.sh                     # Run the demo
+#   ./e2e/run-demo.sh --rebuild-container # Rebuild the container first
 
 set -e
 
@@ -19,22 +18,17 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="$PROJECT_ROOT/e2e/demo-output"
 
 # Parse arguments
-BUILD_ACLI=false
 REBUILD_CONTAINER=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --build-acli)
-            BUILD_ACLI=true
-            shift
-            ;;
         --rebuild-container)
             REBUILD_CONTAINER=true
             shift
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--build-acli] [--rebuild-container]"
+            echo "Usage: $0 [--rebuild-container]"
             exit 1
             ;;
     esac
@@ -42,56 +36,13 @@ done
 
 cd "$PROJECT_ROOT"
 
-# Build acli if requested
-ACLI_BINARY=""
-if [ "$BUILD_ACLI" = true ]; then
-    echo "Building acli with real-anki feature..."
-    echo "WARNING: This requires the full Anki build and may take 30+ minutes."
-    echo
-    
-    # Build in the anki-wrapper workspace
-    cd anki-wrapper
-    cargo build --release --features real-anki -p acli --manifest-path ../acli/Cargo.toml
-    cd "$PROJECT_ROOT"
-    
-    ACLI_BINARY="$PROJECT_ROOT/anki-wrapper/target/release/acli"
-else
-    # Look for existing binary - prefer anki-wrapper binary (has real-anki feature)
-    if [ -f "$PROJECT_ROOT/anki-wrapper/target/release/acli" ]; then
-        ACLI_BINARY="$PROJECT_ROOT/anki-wrapper/target/release/acli"
-    elif [ -f "$PROJECT_ROOT/target/release/acli" ]; then
-        ACLI_BINARY="$PROJECT_ROOT/target/release/acli"
-    else
-        echo "ERROR: acli binary not found."
-        echo "Either build it with --build-acli or ensure it exists at:"
-        echo "  $PROJECT_ROOT/anki-wrapper/target/release/acli"
-        echo "  $PROJECT_ROOT/target/release/acli"
-        exit 1
-    fi
-fi
+# Always build acli with real-anki feature to ensure it can write to Anki collections
+echo "Building acli with real-anki feature..."
+cd anki-wrapper
+cargo build --release --features real-anki -p acli --manifest-path ../acli/Cargo.toml
+cd "$PROJECT_ROOT"
 
-# Verify the binary has real-anki feature by testing if it creates a collection
-echo "Verifying acli binary has real-anki feature..."
-TEST_DIR=$(mktemp -d)
-mkdir -p "$TEST_DIR/content" "$TEST_DIR/collection"
-echo '- Test
-  - Hello <-> World' > "$TEST_DIR/content/test.md"
-"$ACLI_BINARY" sync --source "$TEST_DIR/content" --deck Test --collection "$TEST_DIR/collection/collection.anki2" >/dev/null 2>&1
-
-if [ ! -f "$TEST_DIR/collection/collection.anki2" ]; then
-    rm -rf "$TEST_DIR"
-    echo
-    echo "ERROR: The acli binary does not have the 'real-anki' feature enabled."
-    echo "It cannot write to actual Anki collections."
-    echo
-    echo "To fix this, run with --build-acli to build with the real-anki feature:"
-    echo "  ./e2e/run-demo.sh --build-acli"
-    echo
-    echo "Note: First build takes 30+ minutes to compile the Anki library."
-    exit 1
-fi
-rm -rf "$TEST_DIR"
-echo "Binary verified: real-anki feature is enabled."
+ACLI_BINARY="$PROJECT_ROOT/target/release/acli"
 
 # Check if container needs building
 if [ "$REBUILD_CONTAINER" = true ] || ! podman image exists acli-anki-e2e; then
