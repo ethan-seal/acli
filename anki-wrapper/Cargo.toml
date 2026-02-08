@@ -12,10 +12,12 @@ path = "src/lib.rs"
 [features]
 # Enable the real Anki backend when available
 default = []
-real-anki = ["anki"]
+real-anki = ["anki", "tokio"]
 
 [dependencies]
 anki = { path = "anki/rslib", package = "anki", optional = true }
+# Add tokio with io-util feature needed by anki's sync code
+tokio = { version = "1.45", features = ["io-util"], optional = true }
 
 [dev-dependencies]
 maplit = "1"
