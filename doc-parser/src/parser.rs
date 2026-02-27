@@ -12,7 +12,7 @@ pub trait DocumentParser {
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error>;
 }
 
-/// Parser that recognizes simple `->` and `<->` card syntax in Markdown.
+/// Parser that recognises simple `->` and `<->` card syntax in Markdown.
 pub struct MarkdownParser;
 
 impl MarkdownParser {
@@ -28,263 +28,279 @@ impl Default for MarkdownParser {
     }
 }
 
-impl DocumentParser for MarkdownParser {
-    type Error = ParseError;
+// ── Span ──────────────────────────────────────────────────────────────────────
 
-    /// Walk pulldown-cmark events with a state machine to extract cards.
-    ///
-    /// State:
-    /// - `list_depth`     – increments on `Start(List)`, decrements on `End(List)`
-    /// - `item_depth`     – increments on `Start(Item)`, decrements on `End(Item)`
-    /// - `context_stack`  – (item_depth, text) pairs for ancestor context items
-    /// - `item_text`      – accumulated rendered text for the current list item
-    /// - `item_has_sublist` – true when the current item contains a nested list
-    /// - `in_image`       – true while collecting alt text for an `![alt](url)` image
-    /// - `in_paragraph`   – true inside a top-level paragraph (non-list)
-    ///
-    /// Inline code spans (`Event::Code`) are wrapped in `\x00CODE\x00…\x00ENDCODE\x00`
-    /// sentinels so that arrows inside them are not treated as delimiters.
-    fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
-        let mut doc = ParsedDocument::default();
-
-        let parser = Parser::new_ext(markdown, Options::empty());
-
-        let mut list_depth: usize = 0;
-        let mut item_depth: usize = 0;
-        // (depth_when_pushed, text) — ancestors used to build context questions
-        let mut context_stack: Vec<(usize, String)> = Vec::new();
-
-        // Per-item state
-        let mut item_text = String::new();
-        let mut item_has_sublist = false;
-        let mut current_item_depth: usize = 0;
-
-        // Image accumulation
-        let mut in_image = false;
-        let mut image_url = String::new();
-        let mut image_alt = String::new();
-
-        // Paragraph (non-list) text accumulation
-        let mut in_paragraph = false;
-        let mut paragraph_text = String::new();
-
-        for event in parser {
-            match event {
-                // ── List boundaries ───────────────────────────────────────────
-                Event::Start(Tag::List(_)) => {
-                    list_depth += 1;
-                    if item_depth > 0 {
-                        // A nested list started inside this item → it becomes a
-                        // context parent.  Snapshot its text onto the stack.
-                        item_has_sublist = true;
-                        let text = item_text.trim().to_string();
-                        context_stack.push((current_item_depth, text));
-                        item_text.clear();
-                    }
-                }
-
-                Event::End(Tag::List(_)) => {
-                    list_depth -= 1;
-                    // Pop context entries that belong to the list level we just left.
-                    while context_stack.last().map_or(false, |(d, _)| *d > list_depth) {
-                        context_stack.pop();
-                    }
-                }
-
-                // ── Item boundaries ───────────────────────────────────────────
-                Event::Start(Tag::Item) => {
-                    item_depth += 1;
-                    current_item_depth = item_depth;
-                    item_text.clear();
-                    item_has_sublist = false;
-                }
-
-                Event::End(Tag::Item) => {
-                    // Leaf items (no sub-list) are candidates for cards.
-                    if !item_has_sublist {
-                        let text = item_text.trim().to_string();
-                        if let Some(card) = make_card(&text, &context_stack, current_item_depth) {
-                            doc.cards.push(card);
-                        }
-                    }
-                    item_depth -= 1;
-                    item_text.clear();
-                    item_has_sublist = false;
-                }
-
-                // ── Images ────────────────────────────────────────────────────
-                Event::Start(Tag::Image(_, url, _)) => {
-                    in_image = true;
-                    image_url = url.to_string();
-                    image_alt.clear();
-                }
-
-                Event::End(Tag::Image(_, _, _)) => {
-                    let img = format!("<img src=\"{}\" alt=\"{}\">", image_url, image_alt);
-                    if item_depth > 0 {
-                        item_text.push_str(&img);
-                    } else if in_paragraph {
-                        paragraph_text.push_str(&img);
-                    }
-                    in_image = false;
-                    image_url.clear();
-                    image_alt.clear();
-                }
-
-                // ── Paragraphs (non-list content like "One -> 1") ─────────────
-                Event::Start(Tag::Paragraph) if list_depth == 0 => {
-                    in_paragraph = true;
-                    paragraph_text.clear();
-                }
-
-                Event::End(Tag::Paragraph) if list_depth == 0 => {
-                    in_paragraph = false;
-                    let text = paragraph_text.trim().to_string();
-                    if let Some(card) = make_card(&text, &[], 0) {
-                        doc.cards.push(card);
-                    }
-                    paragraph_text.clear();
-                }
-
-                // ── Inline code spans ─────────────────────────────────────────
-                // pulldown-cmark emits `Event::Code(s)` as a single leaf event
-                // (no Start/End pair).  We wrap the content in sentinel bytes so
-                // the arrow scanner knows to skip it.
-                Event::Code(s) => {
-                    let marker = format!("\x00CODE\x00{}\x00ENDCODE\x00", s.as_ref());
-                    if item_depth > 0 {
-                        item_text.push_str(&marker);
-                    } else if in_paragraph {
-                        paragraph_text.push_str(&marker);
-                    }
-                }
-
-                // ── Text / whitespace ─────────────────────────────────────────
-                Event::Text(s) => {
-                    let text = s.as_ref();
-                    if in_image {
-                        image_alt.push_str(text);
-                    } else if item_depth > 0 {
-                        item_text.push_str(text);
-                    } else if in_paragraph {
-                        paragraph_text.push_str(text);
-                    }
-                }
-
-                Event::SoftBreak => {
-                    if item_depth > 0 {
-                        item_text.push(' ');
-                    } else if in_paragraph {
-                        paragraph_text.push(' ');
-                    }
-                }
-
-                Event::HardBreak => {
-                    if item_depth > 0 {
-                        item_text.push('\n');
-                    } else if in_paragraph {
-                        paragraph_text.push('\n');
-                    }
-                }
-
-                _ => {}
-            }
-        }
-
-        if doc.cards.is_empty() {
-            Err(ParseError::EmptyDocument)
-        } else {
-            Ok(doc)
-        }
-    }
+/// A single inline content unit within a list item or paragraph.
+#[derive(Clone, Debug)]
+enum Span {
+    /// Plain text — may contain `->` / `<->` delimiters.
+    Text(String),
+    /// Inline code content — arrows here are **never** treated as delimiters.
+    Code(String),
+    /// An inline image, rendered as an `<img>` tag in field output.
+    Image { url: String, alt: String },
 }
 
-// ── Helper functions ──────────────────────────────────────────────────────────
-
-/// Attempt to build a [`Card`] from the accumulated text of a list item or paragraph.
+/// Render a span sequence to a plain string suitable for a card field.
 ///
-/// Arrow detection (`<->` / `->`) skips over inline-code sentinels so that
-/// `` `->` `` is never treated as a delimiter.
-fn make_card(text: &str, context_stack: &[(usize, String)], current_depth: usize) -> Option<Card> {
-    if let Some(pos) = find_arrow_outside_code(text, "<->") {
-        let lhs = restore_code(&text[..pos]).trim().to_string();
-        let rhs = restore_code(&text[pos + "<->".len()..]).trim().to_string();
-        let question_raw = format!("{} <-> ?", lhs);
-        let question = build_context_question(context_stack, current_depth, &question_raw);
-        Some(Card {
-            card_type: CardType::Bidirectional,
-            fields: vec![question, rhs],
-        })
-    } else if let Some(pos) = find_arrow_outside_code(text, "->") {
-        let lhs = restore_code(&text[..pos]).trim().to_string();
-        let rhs = restore_code(&text[pos + "->".len()..]).trim().to_string();
-        let question_raw = format!("{} -> ?", lhs);
-        let question = build_context_question(context_stack, current_depth, &question_raw);
-        Some(Card {
-            card_type: CardType::Basic,
-            fields: vec![question, rhs],
-        })
-    } else {
-        None
+/// `Code` content is emitted as-is; `Image` spans become `<img>` tags.
+fn render(spans: &[Span]) -> String {
+    spans.iter().fold(String::new(), |mut out, span| {
+        match span {
+            Span::Text(s) => out.push_str(s),
+            Span::Code(s) => out.push_str(s),
+            Span::Image { url, alt } => out.push_str(&format!(r#"<img src="{url}" alt="{alt}">"#)),
+        }
+        out
+    })
+}
+
+/// Append plain text to a span buffer, coalescing adjacent `Text` nodes.
+fn push_text(spans: &mut Vec<Span>, s: &str) {
+    match spans.last_mut() {
+        Some(Span::Text(t)) => t.push_str(s),
+        _ => spans.push(Span::Text(s.to_string())),
     }
 }
 
-/// Find the byte position of `needle` in `haystack`, skipping over any
-/// `\x00CODE\x00…\x00ENDCODE\x00` spans (inline code sentinels).
-fn find_arrow_outside_code(haystack: &str, needle: &str) -> Option<usize> {
-    const CODE_START: &str = "\x00CODE\x00";
-    const CODE_END: &str = "\x00ENDCODE\x00";
+/// Split `spans` at the first occurrence of `arrow` inside a `Span::Text` node.
+///
+/// `Span::Code` and `Span::Image` nodes are skipped, so arrows in inline code
+/// (e.g. `` `->` ``) are never treated as delimiters.
+///
+/// Returns `(lhs, rhs)` with the arrow token itself consumed and edges trimmed.
+fn split_at_arrow(spans: &[Span], arrow: &str) -> Option<(Vec<Span>, Vec<Span>)> {
+    for (i, span) in spans.iter().enumerate() {
+        if let Span::Text(t) = span {
+            if let Some(pos) = t.find(arrow) {
+                let lhs_tail = t[..pos].trim_end().to_string();
+                let rhs_head = t[pos + arrow.len()..].trim_start().to_string();
 
-    let mut i = 0;
-    while i < haystack.len() {
-        if haystack[i..].starts_with(CODE_START) {
-            // Jump past the entire code sentinel span.
-            let after = i + CODE_START.len();
-            if let Some(end_off) = haystack[after..].find(CODE_END) {
-                i = after + end_off + CODE_END.len();
-            } else {
-                break; // Malformed sentinel; stop scanning.
+                let mut lhs = spans[..i].to_vec();
+                if !lhs_tail.is_empty() {
+                    lhs.push(Span::Text(lhs_tail));
+                }
+
+                let mut rhs = Vec::new();
+                if !rhs_head.is_empty() {
+                    rhs.push(Span::Text(rhs_head));
+                }
+                rhs.extend_from_slice(&spans[i + 1..]);
+
+                return Some((lhs, rhs));
             }
-            continue;
         }
-        if haystack[i..].starts_with(needle) {
-            return Some(i);
-        }
-        // Advance by one UTF-8 character.
-        i += haystack[i..].chars().next().map_or(1, |c| c.len_utf8());
     }
     None
 }
 
-/// Remove `\x00CODE\x00…\x00ENDCODE\x00` sentinels, keeping the inner content.
-fn restore_code(text: &str) -> String {
-    const CODE_START: &str = "\x00CODE\x00";
-    const CODE_END: &str = "\x00ENDCODE\x00";
-    let mut result = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(s) = rest.find(CODE_START) {
-        result.push_str(&rest[..s]);
-        let after = &rest[s + CODE_START.len()..];
-        if let Some(e) = after.find(CODE_END) {
-            result.push_str(&after[..e]);
-            rest = &after[e + CODE_END.len()..];
-        } else {
-            result.push_str(after);
-            return result;
-        }
-    }
-    result.push_str(rest);
-    result
+// ── Accumulator types ─────────────────────────────────────────────────────────
+
+/// Inline content being built for the current list item.
+struct ItemAccum {
+    spans: Vec<Span>,
+    /// Set once a nested `Start(List)` fires — marks this item as a context
+    /// parent rather than a leaf card.
+    has_sublist: bool,
+    /// Value of `list_depth` when `Start(Item)` fired for this item.
+    depth: usize,
 }
 
-/// Build the question field with ancestor context prepended as a nested list.
+impl ItemAccum {
+    fn new(depth: usize) -> Self {
+        Self {
+            spans: Vec::new(),
+            has_sublist: false,
+            depth,
+        }
+    }
+}
+
+/// Alt-text being collected between `Start(Image)` and `End(Image)`.
+struct ImageAccum {
+    url: String,
+    alt: String,
+}
+
+// ── Parser state ──────────────────────────────────────────────────────────────
+
+/// All mutable state for one `parse()` call, with one method per event type.
+struct ParseState {
+    list_depth: usize,
+    /// `(item_depth, rendered_text)` pairs for ancestor context items.
+    context_stack: Vec<(usize, String)>,
+    /// `Some` while inside a list item.
+    current_item: Option<ItemAccum>,
+    /// `Some` while collecting an inline image's alt text.
+    current_image: Option<ImageAccum>,
+    /// `Some` while inside a top-level (non-list) paragraph.
+    paragraph: Option<Vec<Span>>,
+}
+
+impl ParseState {
+    fn new() -> Self {
+        Self {
+            list_depth: 0,
+            context_stack: Vec::new(),
+            current_item: None,
+            current_image: None,
+            paragraph: None,
+        }
+    }
+
+    // ── Routing helper ────────────────────────────────────────────────────────
+
+    /// Return the span buffer that should receive the next text fragment,
+    /// or `None` if we're not currently inside any accumulator.
+    ///
+    /// Image alt-text takes priority over item/paragraph text so that text
+    /// events fired between `Start(Image)` and `End(Image)` go to the alt field.
+    fn text_sink(&mut self) -> Option<&mut Vec<Span>> {
+        if self.current_image.is_some() {
+            // Image alt is a plain String, not Vec<Span>; handled separately.
+            return None;
+        }
+        if let Some(item) = self.current_item.as_mut() {
+            return Some(&mut item.spans);
+        }
+        self.paragraph.as_mut()
+    }
+
+    /// Return the span buffer for break events (soft/hard).
+    ///
+    /// Breaks are *not* routed into image alt-text.
+    fn break_sink(&mut self) -> Option<&mut Vec<Span>> {
+        if let Some(item) = self.current_item.as_mut() {
+            return Some(&mut item.spans);
+        }
+        self.paragraph.as_mut()
+    }
+
+    // ── Event handlers ────────────────────────────────────────────────────────
+
+    fn on_start_list(&mut self) {
+        self.list_depth += 1;
+        if let Some(item) = self.current_item.as_mut() {
+            // This item contains a sub-list — promote it to a context parent.
+            item.has_sublist = true;
+            let text = render(&item.spans).trim().to_string();
+            self.context_stack.push((item.depth, text));
+            item.spans.clear();
+        }
+    }
+
+    fn on_end_list(&mut self) {
+        self.list_depth -= 1;
+        // Drop context entries that belonged to the list level we just left.
+        while self
+            .context_stack
+            .last()
+            .map_or(false, |(d, _)| *d > self.list_depth)
+        {
+            self.context_stack.pop();
+        }
+    }
+
+    fn on_start_item(&mut self) {
+        self.current_item = Some(ItemAccum::new(self.list_depth));
+    }
+
+    /// Consumes the current item and returns a `Card` if it is a leaf item
+    /// with an arrow delimiter; returns `None` for context parents or items
+    /// without a recognisable delimiter.
+    fn on_end_item(&mut self) -> Option<Card> {
+        let item = self.current_item.take()?;
+        if item.has_sublist {
+            return None; // Context parent — not a leaf card.
+        }
+        make_card(&item.spans, &self.context_stack, item.depth)
+    }
+
+    fn on_start_image(&mut self, url: String) {
+        self.current_image = Some(ImageAccum {
+            url,
+            alt: String::new(),
+        });
+    }
+
+    fn on_end_image(&mut self) {
+        let Some(img) = self.current_image.take() else {
+            return;
+        };
+        let span = Span::Image {
+            url: img.url,
+            alt: img.alt,
+        };
+        if let Some(item) = self.current_item.as_mut() {
+            item.spans.push(span);
+        } else if let Some(para) = self.paragraph.as_mut() {
+            para.push(span);
+        }
+    }
+
+    fn on_start_paragraph(&mut self) {
+        if self.list_depth == 0 {
+            self.paragraph = Some(Vec::new());
+        }
+    }
+
+    fn on_end_paragraph(&mut self) -> Option<Card> {
+        let spans = self.paragraph.take()?;
+        make_card(&spans, &[], 0)
+    }
+
+    fn on_text(&mut self, s: &str) {
+        if let Some(img) = self.current_image.as_mut() {
+            img.alt.push_str(s);
+        } else if let Some(buf) = self.text_sink() {
+            push_text(buf, s);
+        }
+    }
+
+    fn on_code_span(&mut self, s: &str) {
+        if let Some(buf) = self.break_sink() {
+            buf.push(Span::Code(s.to_string()));
+        }
+    }
+
+    fn on_soft_break(&mut self) {
+        if let Some(buf) = self.break_sink() {
+            push_text(buf, " ");
+        }
+    }
+
+    fn on_hard_break(&mut self) {
+        if let Some(buf) = self.break_sink() {
+            push_text(buf, "\n");
+        }
+    }
+}
+
+// ── Card construction ─────────────────────────────────────────────────────────
+
+/// Attempt to build a [`Card`] from the accumulated spans of a list item or
+/// paragraph. Tries `<->` before `->` so bidirectional cards are preferred.
+fn make_card(spans: &[Span], context: &[(usize, String)], depth: usize) -> Option<Card> {
+    for (arrow, card_type) in [("<->", CardType::Bidirectional), ("->", CardType::Basic)] {
+        if let Some((lhs, rhs)) = split_at_arrow(spans, arrow) {
+            let question_raw = format!("{} {arrow} ?", render(&lhs).trim());
+            let question = build_context_question(context, depth, &question_raw);
+            return Some(Card {
+                card_type,
+                fields: vec![question, render(&rhs).trim().to_string()],
+            });
+        }
+    }
+    None
+}
+
+/// Prepend ancestor context items as an indented list before `current`.
 fn build_context_question(
-    context_stack: &[(usize, String)],
+    context: &[(usize, String)],
     current_depth: usize,
     current: &str,
 ) -> String {
-    // Ancestors are entries with depth strictly less than the current item's depth.
-    let ancestors: Vec<&str> = context_stack
+    let ancestors: Vec<&str> = context
         .iter()
         .filter(|(d, _)| *d < current_depth)
         .map(|(_, t)| t.as_str())
@@ -296,18 +312,86 @@ fn build_context_question(
 
     let mut q = String::new();
     for (i, text) in ancestors.iter().enumerate() {
-        let indent = "    ".repeat(i);
-        q.push_str(&indent);
+        q.push_str(&"    ".repeat(i));
         q.push_str("- ");
         q.push_str(text);
         q.push('\n');
     }
-    let indent = "    ".repeat(ancestors.len());
-    q.push_str(&indent);
+    q.push_str(&"    ".repeat(ancestors.len()));
     q.push_str("- ");
     q.push_str(current);
     q
 }
+
+// ── DocumentParser impl ───────────────────────────────────────────────────────
+
+impl DocumentParser for MarkdownParser {
+    type Error = ParseError;
+
+    fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
+        let mut state = ParseState::new();
+        let mut doc = ParsedDocument::default();
+
+        for event in Parser::new_ext(markdown, Options::empty()) {
+            let card = match event {
+                Event::Start(Tag::List(_)) => {
+                    state.on_start_list();
+                    None
+                }
+                Event::End(Tag::List(_)) => {
+                    state.on_end_list();
+                    None
+                }
+                Event::Start(Tag::Item) => {
+                    state.on_start_item();
+                    None
+                }
+                Event::End(Tag::Item) => state.on_end_item(),
+                Event::Start(Tag::Image(_, u, _)) => {
+                    state.on_start_image(u.to_string());
+                    None
+                }
+                Event::End(Tag::Image(_, _, _)) => {
+                    state.on_end_image();
+                    None
+                }
+                Event::Start(Tag::Paragraph) => {
+                    state.on_start_paragraph();
+                    None
+                }
+                Event::End(Tag::Paragraph) => state.on_end_paragraph(),
+                Event::Text(s) => {
+                    state.on_text(s.as_ref());
+                    None
+                }
+                Event::Code(s) => {
+                    state.on_code_span(s.as_ref());
+                    None
+                }
+                Event::SoftBreak => {
+                    state.on_soft_break();
+                    None
+                }
+                Event::HardBreak => {
+                    state.on_hard_break();
+                    None
+                }
+                _ => None,
+            };
+            if let Some(card) = card {
+                doc.cards.push(card);
+            }
+        }
+
+        if doc.cards.is_empty() {
+            Err(ParseError::EmptyDocument)
+        } else {
+            Ok(doc)
+        }
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -317,14 +401,12 @@ mod tests {
     /// An arrow inside a backtick code span must NOT be treated as a delimiter.
     #[test]
     fn test_arrow_in_code_span_not_split() {
-        // "`->`" is entirely inside a code span — no card should be produced.
+        // The `->` is inside a Code span — split_at_arrow skips it entirely.
         let input = "- `->` is an arrow";
-        let parser = MarkdownParser::new();
-        let result = parser.parse(input);
+        let result = MarkdownParser::new().parse(input);
         assert!(
             result.is_err(),
-            "Expected no card for arrow-only-in-code-span, got: {:?}",
-            result
+            "expected no card for arrow-only-in-code-span, got: {result:?}",
         );
     }
 
@@ -332,11 +414,11 @@ mod tests {
     #[test]
     fn test_inline_text_preserved() {
         let input = "- hello world -> answer";
-        let parser = MarkdownParser::new();
-        let result = parser.parse(input).unwrap();
+        let result = MarkdownParser::new().parse(input).unwrap();
         assert_eq!(result.cards.len(), 1);
-        assert_eq!(result.cards[0].card_type, CardType::Basic);
-        assert_eq!(result.cards[0].fields[0], "hello world -> ?");
-        assert_eq!(result.cards[0].fields[1], "answer");
+        let card = &result.cards[0];
+        assert_eq!(card.card_type, CardType::Basic);
+        assert_eq!(card.fields[0], "hello world -> ?");
+        assert_eq!(card.fields[1], "answer");
     }
 }
