@@ -1,4 +1,6 @@
-use doc_parser::{Card, CardId, CardType, DocumentParser, MarkdownParser};
+use doc_parser::{
+    Card, CardId, CardType, DocumentParser, MarkdownParser, MediaReference, ParsedDocument,
+};
 use std::collections::HashSet;
 
 #[test]
@@ -133,4 +135,100 @@ fn test_card_id_display() {
     // Should be 16 hex digits
     assert_eq!(display.len(), 16);
     assert!(display.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+// ── MediaReference tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_media_reference_construction() {
+    let mr = MediaReference::new(
+        "images/cat.jpg".to_string(),
+        "cat.jpg".to_string(),
+        Some("a cat".to_string()),
+        1,
+    )
+    .expect("valid MediaReference should construct without error");
+
+    assert_eq!(mr.source_path, "images/cat.jpg");
+    assert_eq!(mr.target_name, "cat.jpg");
+    assert_eq!(mr.alt_text, Some("a cat".to_string()));
+}
+
+#[test]
+fn test_media_reference_no_alt() {
+    let mr = MediaReference::new("photo.png".to_string(), "photo.png".to_string(), None, 5)
+        .expect("valid MediaReference with no alt should construct");
+
+    assert_eq!(mr.alt_text, None);
+}
+
+#[test]
+fn test_parsed_document_default_has_empty_media() {
+    let doc = ParsedDocument::default();
+    assert!(
+        doc.media.is_empty(),
+        "default ParsedDocument.media must be empty"
+    );
+}
+
+#[test]
+fn test_media_reference_rejects_square_brackets() {
+    let err = MediaReference::new(
+        "image[1].jpg".to_string(),
+        "image[1].jpg".to_string(),
+        None,
+        3,
+    )
+    .expect_err("target_name with '[' should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("image[1].jpg"),
+        "error should mention the bad filename: {msg}"
+    );
+}
+
+#[test]
+fn test_media_reference_rejects_double_quote() {
+    let err = MediaReference::new(
+        "file\"name.png".to_string(),
+        "file\"name.png".to_string(),
+        None,
+        7,
+    )
+    .expect_err("target_name with '\"' should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("file\"name.png"),
+        "error should mention the bad filename: {msg}"
+    );
+}
+
+#[test]
+fn test_media_reference_rejects_colon() {
+    let err = MediaReference::new("img:2.jpg".to_string(), "img:2.jpg".to_string(), None, 2)
+        .expect_err("target_name with ':' should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("img:2.jpg"),
+        "error should mention the bad filename: {msg}"
+    );
+}
+
+#[test]
+fn test_media_reference_rejects_empty_source_path() {
+    let err = MediaReference::new(String::new(), "valid.jpg".to_string(), None, 1)
+        .expect_err("empty source_path should be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("source_path must not be empty"),
+        "error should mention empty source: {msg}"
+    );
+}
+
+#[test]
+fn test_media_reference_rejects_control_characters() {
+    // target_name containing a null byte (control character)
+    let err = MediaReference::new("file\0.jpg".to_string(), "file\0.jpg".to_string(), None, 4)
+        .expect_err("target_name with control character should be rejected");
+    assert!(!err.to_string().is_empty());
 }

@@ -3,6 +3,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use crate::error::ParseError;
+
 /// A unique identifier for a card based on its content.
 /// This enables tracking cards across syncs even when their position changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -55,11 +57,70 @@ impl Card {
     }
 }
 
+/// Characters that are not allowed in an Anki `collection.media` filename.
+const INVALID_FILENAME_CHARS: &[char] = &['[', ']', '"', '*', ':', '?', '|', '\\'];
+
+/// A reference to a media file discovered during parsing.
+///
+/// `source_path` is the path as written in the Markdown (may include
+/// directories), while `target_name` is just the filename component that
+/// will be stored in Anki's `collection.media`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaReference {
+    /// Path as written in the Markdown source, may include directory components.
+    pub source_path: String,
+    /// Filename component used when storing the file in Anki's collection.media.
+    pub target_name: String,
+    /// Optional alt-text associated with the image reference.
+    pub alt_text: Option<String>,
+}
+
+impl MediaReference {
+    /// Construct a new `MediaReference`, validating `target_name`.
+    ///
+    /// Returns `Err(ParseError::InvalidMediaName)` if `source_path` is empty
+    /// or if `target_name` contains characters that Anki does not permit
+    /// (`[ ] " * : ? | \` or ASCII control characters).
+    pub fn new(
+        source_path: String,
+        target_name: String,
+        alt_text: Option<String>,
+        line: usize,
+    ) -> Result<Self, ParseError> {
+        if source_path.is_empty() {
+            return Err(ParseError::InvalidMediaName {
+                line,
+                name: target_name,
+                message: "source_path must not be empty".to_string(),
+            });
+        }
+
+        if let Some(bad) = target_name
+            .chars()
+            .find(|c| INVALID_FILENAME_CHARS.contains(c) || c.is_ascii_control())
+        {
+            return Err(ParseError::InvalidMediaName {
+                line,
+                name: target_name,
+                message: format!("contains forbidden character {:?}", bad),
+            });
+        }
+
+        Ok(Self {
+            source_path,
+            target_name,
+            alt_text,
+        })
+    }
+}
+
 /// The result of parsing a document, including all extracted cards.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedDocument {
     /// All cards extracted from the document.
     pub cards: Vec<Card>,
+    /// All media references discovered in the document.
+    pub media: Vec<MediaReference>,
     /// Optional source path for diagnostics.
     pub source_path: Option<String>,
 }

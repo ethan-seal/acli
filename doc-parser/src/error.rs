@@ -22,4 +22,15 @@ pub enum ParseError {
     /// The document contained no recognizable cards.
     #[error("Document contains no cards")]
     EmptyDocument,
+
+    /// A media reference contained an invalid `target_name`.
+    #[error("Invalid media filename at line {line}: \"{name}\" — {message}. Consider renaming the file.")]
+    InvalidMediaName {
+        /// 1-based line number where the image reference appears.
+        line: usize,
+        /// The invalid filename that was provided.
+        name: String,
+        /// Human-readable description of what's wrong.
+        message: String,
+    },
 }
