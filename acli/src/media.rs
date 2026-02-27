@@ -1,5 +1,6 @@
 //! Media file copying utilities for syncing to Anki's collection.media folder.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -57,6 +58,47 @@ pub fn copy_media_to_anki(
     }
 
     Ok(report)
+}
+
+/// Check for filename collisions across multiple documents.
+///
+/// A collision occurs when two different `source_path` values produce the same `target_name`.
+/// The same `source_path` appearing in multiple documents is not a collision.
+///
+/// Returns `Ok(())` if no collisions exist, or `Err(String)` with a descriptive message
+/// listing the conflicting paths and suggesting a rename.
+pub fn check_media_collisions(all_refs: &[MediaReference]) -> Result<(), String> {
+    // Group source_paths by target_name, deduplicating identical source_paths.
+    let mut by_target: HashMap<&str, Vec<&str>> = HashMap::new();
+    for media_ref in all_refs {
+        let sources = by_target.entry(&media_ref.target_name).or_default();
+        if !sources.contains(&&*media_ref.source_path) {
+            sources.push(&media_ref.source_path);
+        }
+    }
+
+    let mut errors: Vec<String> = Vec::new();
+    for (target_name, sources) in &by_target {
+        if sources.len() > 1 {
+            errors.push(format!(
+                "Media filename collision for \"{target_name}\": \
+                multiple source files would map to the same target name.\n  \
+                Sources:\n{}\n  \
+                Rename one of these files to resolve the conflict.",
+                sources
+                    .iter()
+                    .map(|s| format!("    - {s}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n\n"))
+    }
 }
 
 #[cfg(test)]
@@ -162,5 +204,41 @@ mod tests {
         assert_eq!(report.copied, 1, "copied");
         assert_eq!(report.skipped, 1, "skipped");
         assert_eq!(report.missing.len(), 1, "missing");
+    }
+
+    #[test]
+    fn test_collision_same_source_path_is_ok() {
+        // The same source_path referenced from two documents should not be a collision.
+        let refs = vec![
+            make_ref("art/mona.jpg", "mona.jpg"),
+            make_ref("art/mona.jpg", "mona.jpg"),
+        ];
+        assert!(
+            check_media_collisions(&refs).is_ok(),
+            "identical source_path should not be a collision"
+        );
+    }
+
+    #[test]
+    fn test_collision_different_source_paths_same_target_name() {
+        // Two different source paths that map to the same target_name is a hard error.
+        let refs = vec![
+            make_ref("art/mona.jpg", "mona.jpg"),
+            make_ref("photos/mona.jpg", "mona.jpg"),
+        ];
+        let result = check_media_collisions(&refs);
+        assert!(
+            result.is_err(),
+            "different source_paths with same target_name should fail"
+        );
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("art/mona.jpg"),
+            "error message should mention art/mona.jpg; got: {msg}"
+        );
+        assert!(
+            msg.contains("photos/mona.jpg"),
+            "error message should mention photos/mona.jpg; got: {msg}"
+        );
     }
 }
