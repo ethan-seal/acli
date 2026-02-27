@@ -190,32 +190,35 @@ But struggles with:
 
 ### 3.2 Table Format
 
-For conjugations, declensions, or any matrix of related data:
+For conjugations, declensions, or any matrix of related data. A contiguous block of pipe-separated lines forms a table — the first line is the header (where arrow markers live), a blank line ends it. No alignment required.
 
 ```
-| ser (present) |
-| yo      | soy    |
-| tu      | eres   |
-| el/ella | es     |
-| nosotros| somos  |
-| ellos   | son    |
+ser (present):
+subject | form <->
+yo | soy
+tú | eres
+el/ella | es
+nosotros | somos
+ellos | son
 ```
 
 Generates cards:
 - "ser (present): yo → ?" / "soy"
-- "ser (present): tu → ?" / "eres"
+- "ser (present): tú → ?" / "eres"
 - etc.
 
-**More complex table:**
+**More complex table (2D — missing values are visible):**
 ```
-| Latin declensions: puella (girl) |
-| case       | singular | plural  |
-| nominative | puella   | puellae |
-| genitive   | puellae  | puellarum |
-| dative     | puellae  | puellis |
-| accusative | puellam  | puellas |
-| ablative   | puella   | puellis |
+puella (girl):
+case | singular | plural
+nominative | puella | puellae
+genitive | puellae | puellarum
+dative | puellae | puellis
+accusative | puellam |
+ablative | puella | puellis
 ```
+
+The empty trailing cell makes gaps obvious — you can see accusative plural hasn't been filled in yet.
 
 Could generate cards with context:
 - "puella: nominative singular → ?" / "puella"
@@ -350,12 +353,12 @@ Each `key: value` under a heading generates a card.
 For contrasting similar items:
 
 ```
-| compare: affect vs effect |
-| affect | verb, to influence | "The weather affects my mood" |
-| effect | noun, a result | "The effect was immediate" |
+term | definition | example
+affect | verb, to influence | "The weather affects my mood"
+effect | noun, a result | "The effect was immediate"
 ```
 
-Generates cards testing the difference.
+No arrows in the header = no cards generated (reference only). Add arrow markers to generate cards testing the difference.
 
 ---
 
@@ -435,48 +438,50 @@ Generates "After X?" cards automatically from the sequence.
 
 #### Table syntax
 
-**Method 1: Arrow markers in headers**
+A contiguous block of pipe-separated lines forms a table. The first line is the header, where arrow markers define which columns generate cards. A blank line or non-pipe line ends the block. The nearest preceding heading or `label:` line provides context. No alignment required.
 
-Tables generate cards **only if column headers contain arrow markers**. No arrows = no cards (just a regular table).
+```
+## Elements
 
-```markdown
-| Element   | Symbol <-> | Atomic # -> | Phase |
-|-----------|------------|-------------|-------|
-| Hydrogen  | H          | 1           | Gas   |
-| Helium    | He         | 2           | Gas   |
+element | symbol <-> | atomic # -> | phase
+hydrogen | H | 1 | gas
+helium | He | 2 | gas
+lithium | Li | 3 | solid
 ```
 
 Header markers:
-- `Column <->` = bidirectional (row ↔ cell)
-- `Column ->` = forward only (row → cell)
-- `Column <-` = backward only (cell → row)
+- `column <->` = bidirectional (row ↔ cell)
+- `column ->` = forward only (row → cell)
+- `column <-` = backward only (cell → row)
 - No arrow = no cards (display only, can be shown as context)
 
 The first column is always the "concept" (what's being described). Other columns are "descriptors" (properties of the concept).
 
-**Multiline cells: Continuation rows**
+**Missing values are explicit:**
 
-Rows with an empty first cell continue the previous row:
-
-```markdown
-| Term | Definition -> |
-|------|---------------|
-| CPU  | Central Processing Unit |
-|      | The brain of the computer |
-|      | Executes instructions |
-| GPU  | Graphics Processing Unit |
-|      | Handles visual rendering |
+```
+puella (girl):
+case | singular | plural
+nominative | puella | puellae
+genitive | puellae | puellarum
+accusative | puellam |
 ```
 
-Parses as:
-- Row 1: `CPU` → `Central Processing Unit` + `The brain of the computer` + `Executes instructions`
-- Row 2: `GPU` → `Graphics Processing Unit` + `Handles visual rendering`
+The empty trailing cell shows accusative plural hasn't been filled in yet — visible at a glance.
 
-Continuation lines are joined with newlines (or a configurable separator). Works with both arrow headers and templates.
+**Reference tables (no cards):**
 
-**Method 2: Template block (metaprogramming)**
+```
+term | definition | example
+affect | verb, to influence | weather affects mood
+effect | noun, a result | the effect was immediate
+```
 
-A code fence with `template` language, followed by a table. Each row is expanded through the template using **Jinja2/Tera syntax**, then parsed for card syntax.
+No arrows = no cards generated.
+
+**Template block (metaprogramming)**
+
+A code fence with `template` language, followed by a pipe block. Each row is expanded through the template using **Jinja2/Tera syntax**, then parsed for card syntax.
 
 ~~~markdown
 ```template
@@ -484,10 +489,9 @@ A code fence with `template` language, followed by a table. Each row is expanded
 revolutionized {{ field }}.
 ```
 
-| name     | born | died | field   |
-|----------|------|------|---------|
-| Einstein | 1879 | 1955 | physics |
-| Darwin   | 1809 | 1882 | biology |
+name | born | died | field
+einstein | 1879 | 1955 | physics
+darwin | 1809 | 1882 | biology
 ~~~
 
 Expands to:
@@ -519,11 +523,10 @@ After expansion, normal card syntax applies (`->`, `<->`, `[[]]`, `=>`).
 {% if contribution %}Known for: [[{{ contribution }}]].{% endif %}
 ```
 
-| name    | born | died | field     | contribution         |
-|---------|------|------|-----------|----------------------|
-| Einstein| 1879 | 1955 | physicist | theory of relativity |
-| Hawking | 1942 | 2018 | physicist | black hole radiation |
-| Penrose | 1931 |      | physicist | Penrose tilings      |
+name | born | died | field | contribution
+einstein | 1879 | 1955 | physicist | theory of relativity
+hawking | 1942 | 2018 | physicist | black hole radiation
+penrose | 1931 | | physicist | Penrose tilings
 ~~~
 
 Penrose (no death date) expands to:
@@ -550,13 +553,12 @@ Penrose (1931) was a physicist. Known for: [[Penrose tilings]].
 - good morning <-> buenos días
 
 ## Ser (present tense)
-| Subject   | Conjugation <-> |
-|-----------|-----------------|
-| yo        | soy             |
-| tú        | eres            |
-| él/ella   | es              |
-| nosotros  | somos           |
-| ellos     | son             |
+subject | conjugation <->
+yo | soy
+tú | eres
+él/ella | es
+nosotros | somos
+ellos | son
 
 ## Irregular Verbs (reverse practice)
 - was (ser) -> fue
@@ -576,25 +578,18 @@ Proteins are synthesized by [[ribosomes]].
 # Chemistry
 
 ## Elements
-| Element  | Symbol <-> | Atomic # -> | Phase |
-|----------|------------|-------------|-------|
-| Hydrogen | H          | 1           | Gas   |
-| Helium   | He         | 2           | Gas   |
-| Lithium  | Li         | 3           | Solid |
+element | symbol <-> | atomic # -> | phase
+hydrogen | H | 1 | gas
+helium | He | 2 | gas
+lithium | Li | 3 | solid
 
 # Medicine
 
-## Drug Classes (with continuation rows)
-| Drug      | Class ->     | Uses ->                          |
-|-----------|--------------|----------------------------------|
-| Aspirin   | NSAID        | Pain relief                      |
-|           |              | Fever reduction                  |
-|           |              | Heart attack prevention          |
-| Metformin | Biguanide    | Type 2 diabetes (first-line)     |
-|           |              | PCOS treatment                   |
-| Lisinopril| ACE inhibitor| Hypertension                     |
-|           |              | Heart failure                    |
-|           |              | Kidney protection in diabetics   |
+## Drug Classes
+drug | class -> | uses ->
+aspirin | NSAID | pain relief, fever reduction, heart attack prevention
+metformin | biguanide | type 2 diabetes (first-line), PCOS treatment
+lisinopril | ACE inhibitor | hypertension, heart failure, kidney protection in diabetics
 
 # Troubleshooting: Wi-Fi
 
@@ -614,10 +609,9 @@ Proteins are synthesized by [[ribosomes]].
 
 # Comparison (no cards, just reference)
 
-| Term     | Definition                  | Example          |
-|----------|-----------------------------|------------------|
-| affect   | verb, to influence          | Weather affects mood |
-| effect   | noun, a result              | The effect was immediate |
+term | definition | example
+affect | verb, to influence | weather affects mood
+effect | noun, a result | the effect was immediate
 
 # History
 
@@ -628,11 +622,10 @@ Proteins are synthesized by [[ribosomes]].
 known for [[{{ contribution }}]].
 ```
 
-| name      | born | died | nationality | field     | contribution            |
-|-----------|------|------|-------------|-----------|-------------------------|
-| Einstein  | 1879 | 1955 | German      | physicist | theory of relativity    |
-| Darwin    | 1809 | 1882 | English     | naturalist| theory of evolution     |
-| Curie     | 1867 | 1934 | Polish      | chemist   | discovering radium      |
+name | born | died | nationality | field | contribution
+einstein | 1879 | 1955 | German | physicist | theory of relativity
+darwin | 1809 | 1882 | English | naturalist | theory of evolution
+curie | 1867 | 1934 | Polish | chemist | discovering radium
 
 ## US Presidents
 
@@ -641,11 +634,10 @@ known for [[{{ contribution }}]].
 serving from [[{{ start }}]] to [[{{ end }}]].
 ```
 
-| name       | number | start | end  |
-|------------|--------|-------|------|
-| Washington | 1st    | 1789  | 1797 |
-| Lincoln    | 16th   | 1861  | 1865 |
-| FDR        | 32nd   | 1933  | 1945 |
+name | number | start | end
+washington | 1st | 1789 | 1797
+lincoln | 16th | 1861 | 1865
+fdr | 32nd | 1933 | 1945
 
 ## Battles (with conditionals)
 
@@ -655,11 +647,10 @@ The [[{{ battle }}]] ({{ year }}) was fought between {{ side1 }} and {{ side2 }}
 {% if significance %}Significance: {{ significance }}{% endif %}
 ```
 
-| battle       | year | side1   | side2   | victor  | significance              |
-|--------------|------|---------|---------|---------|---------------------------|
-| Thermopylae  | 480 BC| Greeks | Persians| Persians| Spartan last stand        |
-| Hastings     | 1066 | Normans | Saxons | Normans | Norman conquest of England|
-| Gettysburg   | 1863 | Union   | CSA    | Union   | Turning point of Civil War|
+battle | year | side1 | side2 | victor | significance
+thermopylae | 480 BC | Greeks | Persians | Persians | Spartan last stand
+hastings | 1066 | Normans | Saxons | Normans | Norman conquest of England
+gettysburg | 1863 | Union | CSA | Union | Turning point of Civil War
 ```
 
 ### What the Cards Would Look Like
@@ -742,17 +733,16 @@ Heading becomes the subject, each `key -> value` underneath becomes a card.
 
 ---
 
-#### Tables with Arrow Headers
+#### Pipe Block Tables
 
-Arrows in column headers define which columns generate cards and in what direction.
+Arrows in column headers define which columns generate cards and in what direction. A contiguous block of pipe-separated lines forms a table; a blank line ends it.
 
 **Example 1: Conjugation table (bidirectional)**
 
-```markdown
-| Subject   | Conjugation <-> |
-|-----------|-----------------|
-| yo        | soy             |
-| tú        | eres            |
+```
+subject | conjugation <->
+yo | soy
+tú | eres
 ```
 
 | Direction | Front | Back |
@@ -764,11 +754,10 @@ Arrows in column headers define which columns generate cards and in what directi
 
 **Example 2: Elements table (mixed directions)**
 
-```markdown
-| Element  | Symbol <-> | Atomic # -> | Phase |
-|----------|------------|-------------|-------|
-| Hydrogen | H          | 1           | Gas   |
-| Helium   | He         | 2           | Gas   |
+```
+element | symbol <-> | atomic # -> | phase
+hydrogen | H | 1 | gas
+helium | He | 2 | gas
 ```
 
 | Column | Direction | Front | Back |
@@ -778,32 +767,25 @@ Arrows in column headers define which columns generate cards and in what directi
 | Atomic # | Forward | **Elements:** Hydrogen, Atomic #? | 1 |
 | Phase | — | *No cards (no arrow in header)* | — |
 
-**Example 3: Continuation rows (multiline cells)**
+**Example 3: Multi-value cells**
 
-```markdown
-| Drug      | Uses ->                          |
-|-----------|----------------------------------|
-| Aspirin   | Pain relief                      |
-|           | Fever reduction                  |
-|           | Heart attack prevention          |
-| Metformin | Type 2 diabetes (first-line)     |
-|           | PCOS treatment                   |
+```
+drug | uses ->
+aspirin | pain relief, fever reduction, heart attack prevention
+metformin | type 2 diabetes (first-line), PCOS treatment
 ```
 
 | Drug | Front | Back |
 |------|-------|------|
-| Aspirin | **Drug Classes:** Aspirin, Uses? | Pain relief<br>Fever reduction<br>Heart attack prevention |
-| Metformin | **Drug Classes:** Metformin, Uses? | Type 2 diabetes (first-line)<br>PCOS treatment |
+| Aspirin | **Drug Classes:** Aspirin, Uses? | pain relief, fever reduction, heart attack prevention |
+| Metformin | **Drug Classes:** Metformin, Uses? | type 2 diabetes (first-line), PCOS treatment |
 
-Continuation rows (empty first cell) are joined into a single cell value.
+**Example 4: Reference table (no cards)**
 
-**Example 3: Reference table (no cards)**
-
-```markdown
-| Term   | Definition         | Example              |
-|--------|--------------------|----------------------|
-| affect | verb, to influence | Weather affects mood |
-| effect | noun, a result     | The effect was immediate |
+```
+term | definition | example
+affect | verb, to influence | weather affects mood
+effect | noun, a result | the effect was immediate
 ```
 
 No arrows in any header = no cards generated. Just a reference table.
@@ -812,9 +794,9 @@ No arrows in any header = no cards generated. Just a reference table.
 
 ---
 
-#### Template + Table (Metaprogramming)
+#### Template + Pipe Block (Metaprogramming)
 
-A `template` code fence transforms each table row using Jinja2/Tera syntax.
+A `template` code fence transforms each pipe block row using Jinja2/Tera syntax.
 
 **Example: Scientists**
 
@@ -824,10 +806,9 @@ A `template` code fence transforms each table row using Jinja2/Tera syntax.
 known for [[{{ contribution }}]].
 ```
 
-| name     | born | died | nationality | field     | contribution         |
-|----------|------|------|-------------|-----------|----------------------|
-| Einstein | 1879 | 1955 | German      | physicist | theory of relativity |
-| Darwin   | 1809 | 1882 | English     | naturalist| theory of evolution  |
+name | born | died | nationality | field | contribution
+einstein | 1879 | 1955 | German | physicist | theory of relativity
+darwin | 1809 | 1882 | English | naturalist | theory of evolution
 ~~~
 
 **Step 1: Expand template for each row**
@@ -894,11 +875,10 @@ If `died` is empty, that part is omitted. If `contribution` is empty, no cloze c
 | `text [[x]] text` | cloze | 1 | Q: text [...] text → A: x |
 | `=> step` (line prefix) | sequence | 1 per step | Q: First? / After X? → A: step |
 | `# Heading` + `k -> v` | attribute | 1 per line | Q: Heading: k → A: v |
-| table + `Col ->` header | table (forward) | 1 per row | Q: Row, Col? → A: cell |
-| table + `Col <->` header | table (bidirectional) | 2 per row | both directions |
-| table (no arrows) | reference only | 0 | No cards, just display |
-| `\| \| continued... \|` | continuation row | — | Joins with row above |
-| ` ```template ` + table | metaprogramming | varies | Template expanded per row, then parsed |
+| pipe block + `col ->` header | table (forward) | 1 per row | Q: Row, Col? → A: cell |
+| pipe block + `col <->` header | table (bidirectional) | 2 per row | both directions |
+| pipe block (no arrows) | reference only | 0 | No cards, just display |
+| ` ```template ` + pipe block | metaprogramming | varies | Template expanded per row, then parsed |
 
 ---
 
@@ -1039,27 +1019,25 @@ Generates: **HTTP Status Codes › 2xx: success:** 200 → ?
 
 ### 6.1 Language Learning — Deep Dive
 
-**Spanish verb conjugations (table format):**
-```markdown
+**Spanish verb conjugations (pipe block format):**
+```
 ## hablar (to speak)
 
 ### Present
-| Subject   | Form <-> |
-|-----------|----------|
-| yo        | hablo    |
-| tú        | hablas   |
-| él/ella   | habla    |
-| nosotros  | hablamos |
-| ellos     | hablan   |
+subject | form <->
+yo | hablo
+tú | hablas
+él/ella | habla
+nosotros | hablamos
+ellos | hablan
 
 ### Preterite
-| Subject   | Form <-> |
-|-----------|----------|
-| yo        | hablé    |
-| tú        | hablaste |
-| él/ella   | habló    |
-| nosotros  | hablamos |
-| ellos     | hablaron |
+subject | form <->
+yo | hablé
+tú | hablaste
+él/ella | habló
+nosotros | hablamos
+ellos | hablaron
 ```
 
 *Alternative (nested attributes, if you prefer):*
