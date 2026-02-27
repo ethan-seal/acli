@@ -65,7 +65,7 @@ const INVALID_FILENAME_CHARS: &[char] = &['[', ']', '"', '*', ':', '?', '|', '\\
 /// `source_path` is the path as written in the Markdown (may include
 /// directories), while `target_name` is just the filename component that
 /// will be stored in Anki's `collection.media`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MediaReference {
     /// Path as written in the Markdown source, may include directory components.
     pub source_path: String,

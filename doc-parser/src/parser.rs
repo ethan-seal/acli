@@ -1,7 +1,8 @@
 //! Parser traits and Markdown parser implementation.
 use crate::error::ParseError;
-use crate::types::{Card, CardType, ParsedDocument};
+use crate::types::{Card, CardType, MediaReference, ParsedDocument};
 use pulldown_cmark::{Event, Options, Parser, Tag};
+use std::collections::HashSet;
 
 /// Trait for parsing documents into cards.
 pub trait DocumentParser {
@@ -223,19 +224,21 @@ impl ParseState {
         });
     }
 
-    fn on_end_image(&mut self) {
-        let Some(img) = self.current_image.take() else {
-            return;
-        };
+    /// Finalises the current image accumulator, pushing an `Image` span into
+    /// the active buffer and returning `(url, alt)` so the caller can create a
+    /// `MediaReference`.  Returns `None` if no image was being accumulated.
+    fn on_end_image(&mut self) -> Option<(String, String)> {
+        let img = self.current_image.take()?;
         let span = Span::Image {
-            url: img.url,
-            alt: img.alt,
+            url: img.url.clone(),
+            alt: img.alt.clone(),
         };
         if let Some(item) = self.current_item.as_mut() {
             item.spans.push(span);
         } else if let Some(para) = self.paragraph.as_mut() {
             para.push(span);
         }
+        Some((img.url, img.alt))
     }
 
     fn on_start_paragraph(&mut self) {
@@ -331,6 +334,10 @@ impl DocumentParser for MarkdownParser {
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
         let mut state = ParseState::new();
         let mut doc = ParsedDocument::default();
+        // Collect raw media refs before dedup.
+        let mut media_refs: Vec<MediaReference> = Vec::new();
+        // Track which source_paths have already been added (for dedup).
+        let mut seen_paths: HashSet<String> = HashSet::new();
 
         for event in Parser::new_ext(markdown, Options::empty()) {
             let card = match event {
@@ -352,7 +359,20 @@ impl DocumentParser for MarkdownParser {
                     None
                 }
                 Event::End(Tag::Image(_, _, _)) => {
-                    state.on_end_image();
+                    if let Some((url, alt)) = state.on_end_image() {
+                        // Extract just the filename component for target_name.
+                        let target_name = std::path::Path::new(&url)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&url)
+                            .to_string();
+                        let alt_text = if alt.is_empty() { None } else { Some(alt) };
+                        let media_ref = MediaReference::new(url.clone(), target_name, alt_text, 0)?;
+                        // Dedup: keep only the first occurrence of each source_path.
+                        if seen_paths.insert(url) {
+                            media_refs.push(media_ref);
+                        }
+                    }
                     None
                 }
                 Event::Start(Tag::Paragraph) => {
@@ -382,6 +402,8 @@ impl DocumentParser for MarkdownParser {
                 doc.cards.push(card);
             }
         }
+
+        doc.media = media_refs;
 
         if doc.cards.is_empty() {
             Err(ParseError::EmptyDocument)
@@ -420,5 +442,83 @@ mod tests {
         assert_eq!(card.card_type, CardType::Basic);
         assert_eq!(card.fields[0], "hello world -> ?");
         assert_eq!(card.fields[1], "answer");
+    }
+
+    #[test]
+    fn test_image_on_front_creates_media_ref() {
+        let input = "- ![](image.jpg) -> answer";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert!(
+            doc.cards[0].fields[0].contains("<img"),
+            "front: {:?}",
+            doc.cards[0].fields[0]
+        );
+        assert_eq!(doc.cards[0].fields[1], "answer");
+        assert_eq!(doc.media.len(), 1);
+        assert_eq!(doc.media[0].source_path, "image.jpg");
+        assert_eq!(doc.media[0].target_name, "image.jpg");
+    }
+
+    #[test]
+    fn test_image_on_answer_with_alt_and_dir() {
+        let input = "- question -> ![Alt](dir/image.png)";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert!(
+            doc.cards[0].fields[1].contains("<img"),
+            "answer: {:?}",
+            doc.cards[0].fields[1]
+        );
+        assert_eq!(doc.media.len(), 1);
+        assert_eq!(doc.media[0].source_path, "dir/image.png");
+        assert_eq!(doc.media[0].target_name, "image.png");
+        assert_eq!(doc.media[0].alt_text, Some("Alt".to_string()));
+    }
+
+    #[test]
+    fn test_bidirectional_two_images() {
+        let input = "- ![](a.jpg) <-> ![](b.jpg)";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert_eq!(doc.media.len(), 2);
+        let paths: Vec<&str> = doc.media.iter().map(|m| m.source_path.as_str()).collect();
+        assert!(paths.contains(&"a.jpg"), "paths: {paths:?}");
+        assert!(paths.contains(&"b.jpg"), "paths: {paths:?}");
+    }
+
+    #[test]
+    fn test_dedup_same_image_two_cards() {
+        let input = "- ![](shared.jpg) -> first\n- ![](shared.jpg) -> second";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 2);
+        assert_eq!(doc.media.len(), 1, "expected dedup, got: {:?}", doc.media);
+        assert_eq!(doc.media[0].source_path, "shared.jpg");
+    }
+
+    #[test]
+    fn test_nested_context_with_image() {
+        let input = "- Animals\n  - ![](cat.jpg) -> Cat";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert!(
+            doc.cards[0].fields[0].contains("Animals"),
+            "front: {:?}",
+            doc.cards[0].fields[0]
+        );
+        assert_eq!(doc.media.len(), 1);
+        assert_eq!(doc.media[0].source_path, "cat.jpg");
+    }
+
+    #[test]
+    fn test_card_with_no_images() {
+        let input = "- question -> answer";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert!(
+            doc.media.is_empty(),
+            "expected empty media, got: {:?}",
+            doc.media
+        );
     }
 }
