@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod cli;
 pub mod discovery;
 pub mod error;
+pub mod media;
 pub mod output;
 pub mod sync;
 
