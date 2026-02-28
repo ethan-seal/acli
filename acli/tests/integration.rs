@@ -699,6 +699,103 @@ fn test_sync_attribute_cards_heading_resets_between_sections() {
 }
 
 // =============================================================================
+// Test: Pipe table cards
+// =============================================================================
+
+#[test]
+fn test_sync_pipe_table_bidirectional() {
+    // A pipe table with a <-> column should produce forward + reverse cards.
+    let content = "subject | conjugation <->\nyo | soy\ntú | eres\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("verbs.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Spanish");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Spanish")
+        .expect("deck not found");
+
+    // 2 rows × 2 directions = 4 cards
+    assert_eq!(deck.len(), 4, "expected 4 pipe-table cards");
+
+    // Every card should be Basic type (forward/reverse are separate Basic cards).
+    for card in deck.iter() {
+        assert_eq!(
+            card.card_type,
+            anki_wrapper::CardType::Basic,
+            "pipe-table cards should be Basic note type"
+        );
+    }
+
+    // Verify context appears in all fronts (HTML-encoded: → becomes &rarr; or raw Unicode).
+    for card in deck.iter() {
+        assert!(
+            card.fields[0].contains("subject") && card.fields[0].contains("conjugation"),
+            "context 'subject → conjugation' should appear in front: {:?}",
+            card.fields[0]
+        );
+    }
+
+    // Forward card for "yo": back should be "soy"
+    let fwd_yo = deck
+        .iter()
+        .find(|c| c.fields[1].contains("soy") && c.fields[0].contains("yo"));
+    assert!(fwd_yo.is_some(), "forward card for yo→soy not found");
+
+    // Reverse card for "soy": back should be "yo"
+    let rev_soy = deck
+        .iter()
+        .find(|c| c.fields[1].contains("yo") && c.fields[0].contains("soy"));
+    assert!(rev_soy.is_some(), "reverse card for soy→yo not found");
+}
+
+#[test]
+fn test_sync_pipe_table_forward_only() {
+    let content = "term | definition ->\nhello | a greeting\nbye | a farewell\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("terms.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Terms");
+
+    let deck = adapter.inner().decks.get("Terms").expect("deck not found");
+
+    // Forward-only: 2 rows × 1 direction = 2 cards
+    assert_eq!(deck.len(), 2, "expected 2 forward-only cards");
+
+    // All backs should be definitions (not row values).
+    let backs: Vec<&str> = deck.iter().map(|c| c.fields[1].as_str()).collect();
+    assert!(backs.iter().any(|b| b.contains("a greeting")));
+    assert!(backs.iter().any(|b| b.contains("a farewell")));
+}
+
+#[test]
+fn test_sync_pipe_table_empty_cell_skipped() {
+    // Rows with missing cell values should not generate cards for that cell.
+    let content = "subject | value <->\nrow1 | val1\nrow2 |\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("table.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Table");
+
+    let deck = adapter.inner().decks.get("Table").expect("deck not found");
+
+    // Only row1 produces cards (2); row2 is skipped.
+    assert_eq!(deck.len(), 2, "expected 2 cards (empty cell row skipped)");
+}
+
+#[test]
+fn test_sync_pipe_table_mixed_with_basic_cards() {
+    let content = "subject | conjugation <->\nyo | soy\n\n- Capital of France? -> Paris\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("mixed.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Mixed");
+
+    let deck = adapter.inner().decks.get("Mixed").expect("deck not found");
+
+    // 2 pipe-table cards + 1 basic card = 3 total
+    assert_eq!(deck.len(), 3, "expected 2 pipe-table + 1 basic card");
+}
+
+// =============================================================================
 // Test: Ordered sequence cards (=> prefix)
 // =============================================================================
 

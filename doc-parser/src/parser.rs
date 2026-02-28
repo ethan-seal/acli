@@ -4,6 +4,220 @@ use crate::types::{Card, CardType, MediaReference, ParsedDocument};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::HashSet;
 
+// ── Pipe-table pre-processor ─────────────────────────────────────────────────
+
+/// Arrow marker kinds that appear on column headers.
+#[derive(Debug, Clone, PartialEq)]
+enum ArrowMarker {
+    /// `<->` — emit both a forward and a reverse card.
+    Bidirectional,
+    /// `->` — emit only a forward card (row → cell).
+    Forward,
+    /// `<-` — emit only a reverse card (cell → row).
+    Backward,
+}
+
+/// A parsed column header: display name and optional arrow marker.
+#[derive(Debug, Clone)]
+struct ColHeader {
+    name: String,
+    arrow: Option<ArrowMarker>,
+}
+
+/// Parse a raw header cell string (already trimmed) into a [`ColHeader`].
+///
+/// Strips a trailing `<->`, `->`, or `<-` marker and returns the display name
+/// alongside the marker.
+fn parse_col_header(raw: &str) -> ColHeader {
+    let raw = raw.trim();
+    // Order matters: check `<->` before `<-`.
+    if let Some(name) = raw.strip_suffix(" <->").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Bidirectional),
+        };
+    }
+    if let Some(name) = raw.strip_suffix("<->").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Bidirectional),
+        };
+    }
+    if let Some(name) = raw.strip_suffix(" ->").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Forward),
+        };
+    }
+    if let Some(name) = raw.strip_suffix("->").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Forward),
+        };
+    }
+    // Check `<-` last so it doesn't shadow `<->`.
+    if let Some(name) = raw.strip_suffix(" <-").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Backward),
+        };
+    }
+    if let Some(name) = raw.strip_suffix("<-").map(str::trim) {
+        return ColHeader {
+            name: name.to_string(),
+            arrow: Some(ArrowMarker::Backward),
+        };
+    }
+    ColHeader {
+        name: raw.to_string(),
+        arrow: None,
+    }
+}
+
+/// Split a raw pipe-separated line into trimmed cell strings.
+///
+/// Leading/trailing `|` characters are stripped before splitting so that both
+/// `a | b | c` and `| a | b | c |` produce the same `["a", "b", "c"]` slice.
+fn split_pipe_cells(line: &str) -> Vec<&str> {
+    let trimmed = line.trim();
+    // Strip optional surrounding pipes.
+    let inner = trimmed
+        .strip_prefix('|')
+        .unwrap_or(trimmed)
+        .strip_suffix('|')
+        .unwrap_or(trimmed.strip_prefix('|').unwrap_or(trimmed));
+    inner.split('|').map(str::trim).collect()
+}
+
+/// Returns `true` if `line` is a pipe-table line (contains at least one `|`).
+fn is_pipe_line(line: &str) -> bool {
+    line.contains('|')
+}
+
+/// Scan `markdown` for pipe-block groups and extract them as [`Card`] values.
+///
+/// A pipe block is a contiguous run of lines that each contain `|`.  The first
+/// line of the block is treated as the header row; subsequent lines are data
+/// rows.
+///
+/// Returns the extracted cards and the residual text with those lines removed.
+fn extract_pipe_table_cards(markdown: &str) -> (Vec<Card>, String) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut cards: Vec<Card> = Vec::new();
+    let mut consumed: Vec<bool> = vec![false; lines.len()];
+
+    let mut i = 0;
+    while i < lines.len() {
+        if is_pipe_line(lines[i]) {
+            // Find the full contiguous pipe block.
+            let block_start = i;
+            while i < lines.len() && is_pipe_line(lines[i]) {
+                i += 1;
+            }
+            let block_end = i; // exclusive
+
+            // At least two lines needed (header + one data row).
+            if block_end - block_start < 2 {
+                // Skip single-line blocks — leave them un-consumed.
+                continue;
+            }
+
+            // Parse header row.
+            let header_cells = split_pipe_cells(lines[block_start]);
+            if header_cells.is_empty() {
+                continue;
+            }
+
+            // The subject column is always the first column (index 0).
+            let subject_header = header_cells[0].trim().to_string();
+
+            // Parse remaining header columns.
+            let value_headers: Vec<ColHeader> = header_cells[1..]
+                .iter()
+                .map(|c| parse_col_header(c))
+                .collect();
+
+            // Skip tables where no value column has an arrow marker.
+            let any_arrow = value_headers.iter().any(|h| h.arrow.is_some());
+            if !any_arrow {
+                continue;
+            }
+
+            // Emit cards for each data row.
+            for row_line in &lines[block_start + 1..block_end] {
+                let cells = split_pipe_cells(row_line);
+                if cells.is_empty() {
+                    continue;
+                }
+
+                // Row value is always the first cell.
+                let row_value = cells[0].trim();
+                if row_value.is_empty() {
+                    continue;
+                }
+
+                // For each value column with an arrow marker…
+                for (col_idx, header) in value_headers.iter().enumerate() {
+                    let arrow = match &header.arrow {
+                        Some(a) => a,
+                        None => continue, // display-only column
+                    };
+
+                    // Cell value — may be missing (empty trailing cell).
+                    let cell_value = cells
+                        .get(col_idx + 1) // +1 because cells[0] is the subject
+                        .map(|s| s.trim())
+                        .unwrap_or("");
+
+                    if cell_value.is_empty() {
+                        // No card for empty cells.
+                        continue;
+                    }
+
+                    // Context string: "<subject col> → <value col>"
+                    let context = format!("{} \u{2192} {}", subject_header, header.name);
+
+                    // Forward card: front = "<context>\n<row value> →?" / back = cell
+                    if matches!(arrow, ArrowMarker::Bidirectional | ArrowMarker::Forward) {
+                        let front = format!("{}\n{} \u{2192}?", context, row_value);
+                        cards.push(Card {
+                            card_type: CardType::Basic,
+                            fields: vec![front, cell_value.to_string()],
+                        });
+                    }
+
+                    // Reverse card: front = "<context>\n? ← <cell>" / back = row value
+                    if matches!(arrow, ArrowMarker::Bidirectional | ArrowMarker::Backward) {
+                        let front = format!("{}\n? \u{2190} {}", context, cell_value);
+                        cards.push(Card {
+                            card_type: CardType::Basic,
+                            fields: vec![front, row_value.to_string()],
+                        });
+                    }
+                }
+            }
+
+            // Mark all block lines as consumed.
+            for item in consumed.iter_mut().take(block_end).skip(block_start) {
+                *item = true;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    // Build residual text from un-consumed lines.
+    let residual: String = lines
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !consumed[*idx])
+        .map(|(_, l)| *l)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    (cards, residual)
+}
+
 // ── Sequence pre-processor ────────────────────────────────────────────────────
 
 /// Scan `markdown` for sequence blocks (`=>` prefixed lines) and extract them
@@ -530,10 +744,14 @@ impl DocumentParser for MarkdownParser {
     type Error = ParseError;
 
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
+        // Pre-process: extract pipe-table blocks before anything else so that
+        // cmark never sees them and doesn't produce spurious output.
+        let (pipe_table_cards, after_tables) = extract_pipe_table_cards(markdown);
+
         // Pre-process: extract ordered-sequence blocks before passing to the
         // Markdown parser.  The sequence lines (and their labels) are removed
         // from the residual text so that pulldown_cmark never sees them.
-        let (sequence_cards, residual) = extract_sequence_cards(markdown);
+        let (sequence_cards, residual) = extract_sequence_cards(&after_tables);
 
         let mut state = ParseState::new();
         let mut doc = ParsedDocument::default();
@@ -624,12 +842,13 @@ impl DocumentParser for MarkdownParser {
 
         doc.media = media_refs;
 
-        // Prepend sequence cards (they appear first in the source).
-        if !sequence_cards.is_empty() {
-            let mut combined = sequence_cards;
-            combined.extend(doc.cards);
-            doc.cards = combined;
-        }
+        // Prepend pipe-table cards, then sequence cards, then cmark cards.
+        // Order: pipe tables → sequences → inline cards (matches source order).
+        let mut combined: Vec<Card> = Vec::new();
+        combined.extend(pipe_table_cards);
+        combined.extend(sequence_cards);
+        combined.extend(doc.cards);
+        doc.cards = combined;
 
         if doc.cards.is_empty() {
             Err(ParseError::EmptyDocument)

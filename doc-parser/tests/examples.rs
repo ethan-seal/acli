@@ -334,6 +334,169 @@ fn test_attribute_card_multiple_headings_correct_subject() {
     assert_eq!(o_card.fields[0], "Oxygen\nsymbol \u{2192}?");
 }
 
+// ── Pipe table card tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_pipe_table_bidirectional_column() {
+    // subject | conjugation <->
+    // yo | soy
+    // tú | eres
+    let input = "subject | conjugation <->\nyo | soy\ntú | eres";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Each row produces 2 cards (forward + reverse) = 4 total
+    assert_eq!(
+        doc.cards.len(),
+        4,
+        "expected 4 cards (2 rows × 2 directions)"
+    );
+
+    // All cards should be Basic type.
+    for card in &doc.cards {
+        assert_eq!(card.card_type, CardType::Basic);
+    }
+
+    // Forward card for "yo → soy"
+    let fwd_yo = doc
+        .cards
+        .iter()
+        .find(|c| c.fields[0].contains("yo") && c.fields[0].contains("\u{2192}?"))
+        .expect("forward card for 'yo' not found");
+    assert_eq!(
+        fwd_yo.fields[0],
+        "subject \u{2192} conjugation\nyo \u{2192}?"
+    );
+    assert_eq!(fwd_yo.fields[1], "soy");
+
+    // Reverse card for "yo ← soy"
+    let rev_yo = doc
+        .cards
+        .iter()
+        .find(|c| c.fields[0].contains("soy") && c.fields[0].contains("? \u{2190}"))
+        .expect("reverse card for 'soy' not found");
+    assert_eq!(
+        rev_yo.fields[0],
+        "subject \u{2192} conjugation\n? \u{2190} soy"
+    );
+    assert_eq!(rev_yo.fields[1], "yo");
+}
+
+#[test]
+fn test_pipe_table_forward_only_column() {
+    let input = "term | definition ->\nhello | a greeting";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Forward-only: 1 row × 1 direction = 1 card
+    assert_eq!(doc.cards.len(), 1, "expected 1 forward-only card");
+    let card = &doc.cards[0];
+    assert_eq!(card.fields[0], "term \u{2192} definition\nhello \u{2192}?");
+    assert_eq!(card.fields[1], "a greeting");
+}
+
+#[test]
+fn test_pipe_table_backward_only_column() {
+    let input = "term | definition <-\nhello | a greeting";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Backward-only: 1 row × 1 direction = 1 card
+    assert_eq!(doc.cards.len(), 1, "expected 1 backward-only card");
+    let card = &doc.cards[0];
+    assert_eq!(
+        card.fields[0],
+        "term \u{2192} definition\n? \u{2190} a greeting"
+    );
+    assert_eq!(card.fields[1], "hello");
+}
+
+#[test]
+fn test_pipe_table_display_only_column_produces_no_cards() {
+    // A column without an arrow marker should not generate cards.
+    let input = "subject | notes\nyo | native speaker";
+    let parser = MarkdownParser::new();
+    let result = parser.parse(input);
+    // No arrow markers → no cards → EmptyDocument error.
+    assert!(
+        result.is_err(),
+        "expected EmptyDocument when no arrow markers present"
+    );
+}
+
+#[test]
+fn test_pipe_table_empty_trailing_cell_skipped() {
+    // A row with a missing value cell should not produce a card for that cell.
+    let input = "subject | conjugation <->\nyo | soy\nél/ella |";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Only "yo" row produces cards (2); "él/ella" row is skipped (empty cell).
+    assert_eq!(
+        doc.cards.len(),
+        2,
+        "empty trailing cell should produce no card"
+    );
+    for card in &doc.cards {
+        // No card should reference él/ella as the row value for a forward card.
+        assert!(
+            !card.fields[1].contains("él/ella"),
+            "card back should not contain row value from empty-cell row: {:?}",
+            card.fields[1]
+        );
+    }
+}
+
+#[test]
+fn test_pipe_table_multiple_value_columns() {
+    // subject | col1 <-> | col2 ->
+    // a       | b        | c
+    let input = "subject | col1 <-> | col2 ->\na | b | c";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // col1 <-> → 2 cards; col2 -> → 1 card; total = 3
+    assert_eq!(
+        doc.cards.len(),
+        3,
+        "expected 3 cards from two marked columns"
+    );
+}
+
+#[test]
+fn test_pipe_table_context_uses_column_headers() {
+    // Context is derived from column headers, not from any document heading.
+    let input = "# Some Heading\nfoo | bar <->\na | b";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // The pipe-table cards should have context "foo → bar", not "Some Heading".
+    let pipe_cards: Vec<_> = doc
+        .cards
+        .iter()
+        .filter(|c| c.fields[0].contains("foo \u{2192} bar"))
+        .collect();
+    assert_eq!(
+        pipe_cards.len(),
+        2,
+        "expected 2 pipe-table cards with correct context"
+    );
+}
+
+#[test]
+fn test_pipe_table_mixed_with_basic_cards() {
+    // A pipe table followed by a regular basic card.
+    let input = "subject | conjugation <->\nyo | soy\n\n- Capital of France? -> Paris";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // 2 pipe-table cards + 1 basic card = 3 total
+    assert_eq!(doc.cards.len(), 3, "expected 2 pipe-table + 1 basic");
+
+    let basic_count = doc.cards.iter().filter(|c| c.fields[1] == "Paris").count();
+    assert_eq!(basic_count, 1, "expected 1 basic card with 'Paris' answer");
+}
+
 // ── MediaReference tests ───────────────────────────────────────────────────────
 
 #[test]
