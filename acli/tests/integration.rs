@@ -599,6 +599,106 @@ fn test_sync_fails_on_media_collision() {
 }
 
 // =============================================================================
+// Test: Attribute cards (heading + key -> value)
+// =============================================================================
+
+#[test]
+fn test_sync_attribute_cards_with_heading() {
+    let content = "# Hydrogen\n- symbol -> H\n- atomic number -> 1\n- phase -> gas\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("elements.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Chemistry");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Chemistry")
+        .expect("deck not found");
+    assert_eq!(deck.len(), 3, "expected 3 attribute cards");
+
+    // Each card front should contain the heading "Hydrogen" and the unicode arrow →?
+    for card in deck.iter() {
+        assert!(
+            card.fields[0].contains("Hydrogen"),
+            "card front should contain heading: {:?}",
+            card.fields[0]
+        );
+        assert!(
+            card.fields[0].contains("\u{2192}?"),
+            "card front should contain →?: {:?}",
+            card.fields[0]
+        );
+    }
+
+    // Verify individual card answers
+    let values: Vec<&str> = deck.iter().map(|c| c.fields[1].as_str()).collect();
+    assert!(values.iter().any(|v| v.contains('H')), "missing H card");
+    assert!(
+        values.iter().any(|v| v.contains('1')),
+        "missing atomic number card"
+    );
+    assert!(
+        values.iter().any(|v| v.contains("gas")),
+        "missing phase card"
+    );
+}
+
+#[test]
+fn test_sync_attribute_cards_no_heading_is_plain_basic() {
+    // Without a heading, -> items are plain basic cards.
+    let content = "- symbol -> H\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("plain.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Plain");
+
+    let deck = adapter.inner().decks.get("Plain").expect("deck not found");
+    assert_eq!(deck.len(), 1);
+
+    // Front must NOT contain →? (unicode arrow) — plain basic uses "-> ?"
+    assert!(
+        !deck[0].fields[0].contains("\u{2192}?"),
+        "plain card should not use unicode arrow: {:?}",
+        deck[0].fields[0]
+    );
+    // The adapter HTML-encodes ">" as "&gt;", so the stored form is "-> ?" → "-&gt; ?"
+    assert!(
+        deck[0].fields[0].contains('-'),
+        "plain card front should use ascii arrow (html-encoded): {:?}",
+        deck[0].fields[0]
+    );
+}
+
+#[test]
+fn test_sync_attribute_cards_heading_resets_between_sections() {
+    let content = "# Hydrogen\n- symbol -> H\n\n# Oxygen\n- symbol -> O\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("elements.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Elements");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Elements")
+        .expect("deck not found");
+    assert_eq!(deck.len(), 2, "expected 2 attribute cards");
+
+    let hydrogen_card = deck.iter().find(|c| c.fields[1].contains('H'));
+    let oxygen_card = deck.iter().find(|c| c.fields[1].contains('O'));
+
+    assert!(hydrogen_card.is_some(), "Hydrogen card not found");
+    assert!(oxygen_card.is_some(), "Oxygen card not found");
+
+    assert!(
+        hydrogen_card.unwrap().fields[0].contains("Hydrogen"),
+        "H card should reference Hydrogen heading"
+    );
+    assert!(
+        oxygen_card.unwrap().fields[0].contains("Oxygen"),
+        "O card should reference Oxygen heading"
+    );
+}
+
+// =============================================================================
 // Test: Ordered sequence cards (=> prefix)
 // =============================================================================
 

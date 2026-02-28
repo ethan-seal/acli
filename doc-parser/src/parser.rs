@@ -270,6 +270,10 @@ struct ParseState {
     current_image: Option<ImageAccum>,
     /// `Some` while inside a top-level (non-list) paragraph.
     paragraph: Option<Vec<Span>>,
+    /// Text accumulator while inside a heading element.
+    heading_accum: Option<String>,
+    /// The most recently seen heading text; used as subject label for attribute cards.
+    current_heading: Option<String>,
 }
 
 impl ParseState {
@@ -280,6 +284,8 @@ impl ParseState {
             current_item: None,
             current_image: None,
             paragraph: None,
+            heading_accum: None,
+            current_heading: None,
         }
     }
 
@@ -330,7 +336,7 @@ impl ParseState {
         while self
             .context_stack
             .last()
-            .map_or(false, |(d, _)| *d > self.list_depth)
+            .is_some_and(|(d, _)| *d > self.list_depth)
         {
             self.context_stack.pop();
         }
@@ -348,7 +354,12 @@ impl ParseState {
         if item.has_sublist {
             return None; // Context parent — not a leaf card.
         }
-        make_card(&item.spans, &self.context_stack, item.depth)
+        make_card(
+            &item.spans,
+            &self.context_stack,
+            item.depth,
+            self.current_heading.as_deref(),
+        )
     }
 
     fn on_start_image(&mut self, url: String) {
@@ -383,12 +394,14 @@ impl ParseState {
 
     fn on_end_paragraph(&mut self) -> Option<Card> {
         let spans = self.paragraph.take()?;
-        make_card(&spans, &[], 0)
+        make_card(&spans, &[], 0, None)
     }
 
     fn on_text(&mut self, s: &str) {
         if let Some(img) = self.current_image.as_mut() {
             img.alt.push_str(s);
+        } else if let Some(h) = self.heading_accum.as_mut() {
+            h.push_str(s);
         } else if let Some(buf) = self.text_sink() {
             push_text(buf, s);
         }
@@ -411,23 +424,74 @@ impl ParseState {
             push_text(buf, "\n");
         }
     }
+
+    fn on_start_heading(&mut self) {
+        self.heading_accum = Some(String::new());
+    }
+
+    fn on_end_heading(&mut self) {
+        if let Some(text) = self.heading_accum.take() {
+            let trimmed = text.trim().to_string();
+            self.current_heading = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            };
+        }
+    }
 }
 
 // ── Card construction ─────────────────────────────────────────────────────────
 
 /// Attempt to build a [`Card`] from the accumulated spans of a list item or
 /// paragraph. Tries `<->` before `->` so bidirectional cards are preferred.
-fn make_card(spans: &[Span], context: &[(usize, String)], depth: usize) -> Option<Card> {
-    for (arrow, card_type) in [("<->", CardType::Bidirectional), ("->", CardType::Basic)] {
-        if let Some((lhs, rhs)) = split_at_arrow(spans, arrow) {
-            let question_raw = format!("{} {arrow} ?", render(&lhs).trim());
-            let question = build_context_question(context, depth, &question_raw);
-            return Some(Card {
-                card_type,
-                fields: vec![question, render(&rhs).trim().to_string()],
-            });
-        }
+///
+/// When `heading` is `Some` and the item uses `->` syntax (attribute pattern),
+/// the card front is formatted as `"{heading}\n{key} →?"` (two lines).
+/// `<->` items are never treated as attribute cards.
+fn make_card(
+    spans: &[Span],
+    context: &[(usize, String)],
+    depth: usize,
+    heading: Option<&str>,
+) -> Option<Card> {
+    // Try bidirectional first — heading context does not apply to <-> cards.
+    if let Some((lhs, rhs)) = split_at_arrow(spans, "<->") {
+        let question_raw = format!("{} <-> ?", render(&lhs).trim());
+        let question = build_context_question(context, depth, &question_raw);
+        return Some(Card {
+            card_type: CardType::Bidirectional,
+            fields: vec![question, render(&rhs).trim().to_string()],
+        });
     }
+
+    // Try basic (->).  If a heading is present and context_stack is empty
+    // (i.e. this is a top-level list item, not already nested), emit an
+    // attribute card with a two-line front.
+    if let Some((lhs, rhs)) = split_at_arrow(spans, "->") {
+        let key = render(&lhs).trim().to_string();
+        let value = render(&rhs).trim().to_string();
+
+        let question = if let Some(subject) = heading {
+            // Only apply heading when there is no nested list context —
+            // nested items already have their own context chain.
+            if context.is_empty() {
+                format!("{subject}\n{key} \u{2192}?")
+            } else {
+                let question_raw = format!("{key} -> ?");
+                build_context_question(context, depth, &question_raw)
+            }
+        } else {
+            let question_raw = format!("{key} -> ?");
+            build_context_question(context, depth, &question_raw)
+        };
+
+        return Some(Card {
+            card_type: CardType::Basic,
+            fields: vec![question, value],
+        });
+    }
+
     None
 }
 
@@ -494,6 +558,14 @@ impl DocumentParser for MarkdownParser {
                 }
                 Event::End(Tag::List(_)) => {
                     state.on_end_list();
+                    None
+                }
+                Event::Start(Tag::Heading(_, _, _)) => {
+                    state.on_start_heading();
+                    None
+                }
+                Event::End(Tag::Heading(_, _, _)) => {
+                    state.on_end_heading();
                     None
                 }
                 Event::Start(Tag::Item) => {

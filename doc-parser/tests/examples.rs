@@ -248,6 +248,92 @@ fn test_card_id_display() {
     assert!(display.chars().all(|c| c.is_ascii_hexdigit()));
 }
 
+// ── Attribute card tests (heading + key -> value) ─────────────────────────────
+
+#[test]
+fn test_attribute_card_with_heading() {
+    let input = "# Hydrogen\n- symbol -> H\n- atomic number -> 1\n- phase -> gas\n";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 3, "expected 3 attribute cards");
+
+    // All cards should be Basic type.
+    for card in &doc.cards {
+        assert_eq!(card.card_type, CardType::Basic);
+    }
+
+    // Front should be two lines: heading on line 1, "key →?" on line 2.
+    let symbol_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
+    assert_eq!(symbol_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+    assert_eq!(symbol_card.fields[1], "H");
+
+    let atomic_card = doc.cards.iter().find(|c| c.fields[1] == "1").unwrap();
+    assert_eq!(atomic_card.fields[0], "Hydrogen\natomic number \u{2192}?");
+
+    let phase_card = doc.cards.iter().find(|c| c.fields[1] == "gas").unwrap();
+    assert_eq!(phase_card.fields[0], "Hydrogen\nphase \u{2192}?");
+}
+
+#[test]
+fn test_attribute_card_without_heading_is_plain_basic() {
+    // No heading → plain basic card, existing format "key -> ?"
+    let input = "- symbol -> H\n";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    let card = &doc.cards[0];
+    assert_eq!(card.card_type, CardType::Basic);
+    assert_eq!(card.fields[0], "symbol -> ?");
+    assert_eq!(card.fields[1], "H");
+}
+
+#[test]
+fn test_heading_resets_between_sections() {
+    let input = "# Hydrogen\n- symbol -> H\n\n# Oxygen\n- symbol -> O\n";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2);
+
+    let h_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
+    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+
+    let o_card = doc.cards.iter().find(|c| c.fields[1] == "O").unwrap();
+    assert_eq!(o_card.fields[0], "Oxygen\nsymbol \u{2192}?");
+}
+
+#[test]
+fn test_heading_applies_only_to_basic_not_bidirectional() {
+    // <-> items under a heading remain plain bidirectional cards (heading context ignored).
+    let input = "# Science\n- hot <-> cold\n";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    let card = &doc.cards[0];
+    assert_eq!(card.card_type, CardType::Bidirectional);
+    // Front should NOT contain the heading in a two-line format.
+    assert_eq!(card.fields[0], "hot <-> ?");
+}
+
+#[test]
+fn test_attribute_card_multiple_headings_correct_subject() {
+    // Items under H2 should use H2 heading, not H1.
+    let input = "# Chemistry\n\n## Hydrogen\n- symbol -> H\n\n## Oxygen\n- symbol -> O\n";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2);
+
+    let h_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
+    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+
+    let o_card = doc.cards.iter().find(|c| c.fields[1] == "O").unwrap();
+    assert_eq!(o_card.fields[0], "Oxygen\nsymbol \u{2192}?");
+}
+
 // ── MediaReference tests ───────────────────────────────────────────────────────
 
 #[test]
