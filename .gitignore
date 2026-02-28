@@ -7,3 +7,4 @@ anki-wrapper/anki/.git/
 anki-wrapper/anki/*
 !anki-wrapper/anki/README.md
 __pycache__/
+notes/Art/
