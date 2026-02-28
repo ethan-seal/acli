@@ -6,6 +6,9 @@ pub struct SyncResult {
     pub cards_synced: usize,
     pub deck_name: String,
     pub dry_run: bool,
+    pub media_copied: usize,
+    pub media_skipped: usize,
+    pub media_missing: usize,
 }
 
 impl SyncResult {
@@ -20,6 +23,9 @@ impl SyncResult {
             cards_synced,
             deck_name,
             dry_run,
+            media_copied: 0,
+            media_skipped: 0,
+            media_missing: 0,
         }
     }
 }
@@ -33,7 +39,16 @@ impl fmt::Display for SyncResult {
             self.cards_synced,
             self.deck_name,
             if self.dry_run { "yes" } else { "no" }
-        )
+        )?;
+        let total_media = self.media_copied + self.media_skipped + self.media_missing;
+        if total_media > 0 {
+            write!(
+                f,
+                "\n  Media copied: {}\n  Media skipped: {}\n  Media missing: {}",
+                self.media_copied, self.media_skipped, self.media_missing
+            )?;
+        }
+        Ok(())
     }
 }
 

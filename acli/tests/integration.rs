@@ -424,6 +424,7 @@ fn test_sync_via_ankicli_dry_run() {
         source_dirs: vec![temp_dir.path().to_path_buf()],
         deck_name: "DryRun".to_string(),
         anki_collection_path: None,
+        anki_media_dir: None,
         recursive: true,
         dry_run: true,
     };
@@ -458,4 +459,140 @@ fn test_sync_multiple_source_directories() {
         .expect("failed to discover files");
 
     assert_eq!(files.len(), 2, "should find files from both directories");
+}
+
+// =============================================================================
+// Test: Media handling in sync workflow
+// =============================================================================
+
+#[test]
+fn test_sync_with_image_cards_no_media_dir() {
+    // Sync with image cards but no anki_media_dir — should succeed, cards created normally.
+    let content = r#"- ![photo](photo.jpg) What is this? -> A photograph
+"#;
+
+    let temp_dir = setup_temp_dir_with_files(&[("cards.md", content)]);
+
+    let cli = AnkiCli::new();
+    let config = SyncConfig {
+        source_dirs: vec![temp_dir.path().to_path_buf()],
+        deck_name: "MediaTest".to_string(),
+        anki_collection_path: None,
+        anki_media_dir: None,
+        recursive: true,
+        dry_run: false,
+    };
+
+    let result = cli
+        .sync(&config)
+        .expect("sync with image cards should succeed");
+    assert!(!result.dry_run);
+    assert_eq!(result.files_processed, 1);
+    assert_eq!(
+        result.media_copied, 0,
+        "no media dir configured, nothing copied"
+    );
+    assert_eq!(result.media_skipped, 0);
+    assert_eq!(result.media_missing, 0);
+}
+
+#[test]
+fn test_sync_copies_media_files() {
+    // Create a markdown file referencing photo.jpg, create the file, run sync with media dir.
+    let content = r#"- ![alt](photo.jpg) -> answer
+"#;
+
+    let doc_dir = tempfile::tempdir().expect("failed to create doc dir");
+    fs::write(doc_dir.path().join("cards.md"), content).expect("failed to write md");
+    fs::write(doc_dir.path().join("photo.jpg"), b"fake jpeg data").expect("failed to write image");
+
+    let anki_media_dir = tempfile::tempdir().expect("failed to create media dir");
+
+    let cli = AnkiCli::new();
+    let config = SyncConfig {
+        source_dirs: vec![doc_dir.path().to_path_buf()],
+        deck_name: "MediaCopy".to_string(),
+        anki_collection_path: None,
+        anki_media_dir: Some(anki_media_dir.path().to_path_buf()),
+        recursive: true,
+        dry_run: false,
+    };
+
+    let result = cli
+        .sync(&config)
+        .expect("sync with media dir should succeed");
+    assert_eq!(result.media_copied, 1, "expected 1 file copied");
+    assert_eq!(result.media_skipped, 0);
+    assert_eq!(result.media_missing, 0);
+    assert!(
+        anki_media_dir.path().join("photo.jpg").exists(),
+        "photo.jpg should have been copied to anki_media_dir"
+    );
+}
+
+#[test]
+fn test_sync_skips_already_present_media() {
+    // Pre-populate anki_media_dir with the file — sync should skip it.
+    let content = r#"- ![alt](photo.jpg) -> answer
+"#;
+
+    let doc_dir = tempfile::tempdir().expect("failed to create doc dir");
+    fs::write(doc_dir.path().join("cards.md"), content).expect("failed to write md");
+    fs::write(doc_dir.path().join("photo.jpg"), b"source image").expect("failed to write image");
+
+    let anki_media_dir = tempfile::tempdir().expect("failed to create media dir");
+    // Pre-populate destination
+    fs::write(anki_media_dir.path().join("photo.jpg"), b"existing image")
+        .expect("failed to write existing media");
+
+    let cli = AnkiCli::new();
+    let config = SyncConfig {
+        source_dirs: vec![doc_dir.path().to_path_buf()],
+        deck_name: "MediaSkip".to_string(),
+        anki_collection_path: None,
+        anki_media_dir: Some(anki_media_dir.path().to_path_buf()),
+        recursive: true,
+        dry_run: false,
+    };
+
+    let result = cli
+        .sync(&config)
+        .expect("sync should succeed even with existing media");
+    assert_eq!(result.media_skipped, 1, "expected 1 file skipped");
+    assert_eq!(result.media_copied, 0, "expected 0 files copied");
+    assert_eq!(result.media_missing, 0);
+}
+
+#[test]
+fn test_sync_fails_on_media_collision() {
+    // Two markdown files each reference a different source path that maps to the same target name.
+    // source_path differs ("art/mona.jpg" vs "photos/mona.jpg") but target_name is "mona.jpg" for both.
+    let file1 = r#"- ![](art/mona.jpg) -> painting1
+"#;
+    let file2 = r#"- ![](photos/mona.jpg) -> painting2
+"#;
+
+    let temp_dir = setup_temp_dir_with_files(&[("file1.md", file1), ("file2.md", file2)]);
+
+    let cli = AnkiCli::new();
+    let config = SyncConfig {
+        source_dirs: vec![temp_dir.path().to_path_buf()],
+        deck_name: "CollisionTest".to_string(),
+        anki_collection_path: None,
+        anki_media_dir: None,
+        recursive: true,
+        dry_run: false,
+    };
+
+    let result = cli.sync(&config);
+    assert!(
+        result.is_err(),
+        "sync should fail on media filename collision"
+    );
+    let err = result.unwrap_err();
+    let err_msg = err.to_string();
+    assert!(
+        err_msg.contains("mona.jpg") || err_msg.contains("collision"),
+        "error message should mention the collision: {err_msg}"
+    );
 }

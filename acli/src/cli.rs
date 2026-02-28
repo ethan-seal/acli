@@ -78,6 +78,7 @@ pub fn run() -> Result<(), CliError> {
                 source_dirs: vec![source],
                 deck_name: deck,
                 anki_collection_path: collection,
+                anki_media_dir: None,
                 recursive,
                 dry_run: false,
             };
@@ -95,6 +96,7 @@ pub fn run() -> Result<(), CliError> {
                 source_dirs: vec![source],
                 deck_name: deck,
                 anki_collection_path: None,
+                anki_media_dir: None,
                 recursive,
                 dry_run: true,
             };
