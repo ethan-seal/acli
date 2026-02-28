@@ -1,16 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::adapter::AnkiCollectionAdapter;
+use crate::adapter::{convert_card as convert_to_anki_card, AnkiCollectionAdapter};
 use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
 #[cfg(not(feature = "real-anki"))]
 use anki_wrapper::FakeAnkiCollection;
+use anki_wrapper::{AnkiCollection as AnkiWrapperCollection, CardInfo, CardType as AnkiCardType};
 use doc_parser::{Card, DocumentParser, MarkdownParser, MediaReference};
-use update_planner_parser::{
-    DefaultExecutor, DocumentSet, PlanExecutor, SimplePlanner, SyncPlan, UpdatePlanner,
-};
 
 #[derive(Debug, Clone, Default)]
 pub struct SyncConfig {
@@ -26,6 +24,105 @@ pub struct SyncConfig {
 pub struct ValidationConfig {
     pub source_dirs: Vec<PathBuf>,
     pub recursive: bool,
+}
+
+/// A content-based card identity used for matching parsed cards against Anki cards.
+/// Two cards are "the same" if they have the same type and fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CardContentKey {
+    card_type: AnkiCardType,
+    fields: Vec<String>,
+}
+
+/// Result of diffing parsed cards against what's currently in Anki.
+struct IncrementalDiff {
+    /// Parsed cards to add (not currently in Anki).
+    to_add: Vec<Card>,
+    /// Anki database IDs of cards to delete (in Anki but not in parsed).
+    to_delete: Vec<anki_wrapper::CardId>,
+    /// Number of cards that are unchanged (in both parsed and Anki).
+    unchanged: usize,
+}
+
+/// Compute the diff between parsed cards and the current Anki deck state.
+///
+/// Cards are matched by content: (card_type, fields) after HTML conversion.
+/// - Parsed cards not found in Anki → to_add
+/// - Anki cards not found in parsed → to_delete
+/// - Cards in both → unchanged (reviews preserved)
+fn compute_incremental_diff(parsed_cards: &[Card], anki_cards: &[CardInfo]) -> IncrementalDiff {
+    // Convert parsed cards to their Anki representation (HTML fields + mapped type)
+    // so we compare apples to apples.
+    let parsed_keys: Vec<CardContentKey> = parsed_cards
+        .iter()
+        .map(|c| {
+            let anki_card = convert_to_anki_card(&to_planner_card(c));
+            CardContentKey {
+                card_type: anki_card.card_type,
+                fields: anki_card.fields,
+            }
+        })
+        .collect();
+
+    // Build content keys for what's currently in Anki
+    let anki_keys: Vec<CardContentKey> = anki_cards
+        .iter()
+        .map(|c| CardContentKey {
+            card_type: c.card_type.clone(),
+            fields: c.fields.clone(),
+        })
+        .collect();
+
+    // Use multiset-style matching to handle duplicate cards correctly.
+    // Track which Anki cards have been matched (by index).
+    let mut anki_matched: Vec<bool> = vec![false; anki_cards.len()];
+    let mut parsed_matched: Vec<bool> = vec![false; parsed_cards.len()];
+
+    // Match parsed cards to Anki cards
+    for (pi, pk) in parsed_keys.iter().enumerate() {
+        for (ai, ak) in anki_keys.iter().enumerate() {
+            if !anki_matched[ai] && pk == ak {
+                anki_matched[ai] = true;
+                parsed_matched[pi] = true;
+                break;
+            }
+        }
+    }
+
+    let to_add: Vec<Card> = parsed_cards
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !parsed_matched[*i])
+        .map(|(_, c)| c.clone())
+        .collect();
+
+    let to_delete: Vec<anki_wrapper::CardId> = anki_cards
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !anki_matched[*i])
+        .map(|(_, c)| c.id)
+        .collect();
+
+    let unchanged = parsed_matched.iter().filter(|m| **m).count();
+
+    IncrementalDiff {
+        to_add,
+        to_delete,
+        unchanged,
+    }
+}
+
+/// Convert a doc_parser::Card to an update_planner_parser::Card.
+fn to_planner_card(card: &Card) -> update_planner_parser::Card {
+    let card_type = match card.card_type {
+        doc_parser::CardType::Basic => update_planner_parser::CardType::Basic,
+        doc_parser::CardType::Bidirectional => update_planner_parser::CardType::Bidirectional,
+        doc_parser::CardType::Sequence => update_planner_parser::CardType::Sequence,
+    };
+    update_planner_parser::Card {
+        card_type,
+        fields: card.fields.clone(),
+    }
 }
 
 #[derive(Default)]
@@ -55,14 +152,10 @@ impl AnkiCli {
         crate::media::check_media_collisions(&all_media_refs)
             .map_err(CliError::MediaCollisionError)?;
 
-        // Convert to DocumentSet and generate sync plan
-        let document_set = to_document_set(&parsed);
-        let plan = self.plan_sync(&document_set, &config.deck_name)?;
-
         if config.dry_run {
             return Ok(SyncResult::new(
                 markdown_files.len(),
-                plan.operations.len(),
+                parsed.cards.len(),
                 config.deck_name.clone(),
                 true,
             ));
@@ -84,15 +177,37 @@ impl AnkiCli {
             }
         }
 
-        // Execute plan against Anki collection
-        self.execute_plan(&plan, config)?;
+        // Execute incremental sync against Anki collection
+        #[cfg(feature = "real-anki")]
+        let sync_counts = {
+            use anki_wrapper::DefaultAnkiCollection;
+            let collection = if let Some(path) = &config.anki_collection_path {
+                DefaultAnkiCollection::open_collection_path(path)
+                    .map_err(|e| CliError::AnkiError(e.to_string()))?
+            } else {
+                DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
+            };
+            let mut adapter = AnkiCollectionAdapter::new(collection);
+            sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
+                .map_err(|e| CliError::ExecutionError(e.to_string()))?
+        };
+
+        #[cfg(not(feature = "real-anki"))]
+        let sync_counts = {
+            let mut adapter = AnkiCollectionAdapter::new(FakeAnkiCollection::new());
+            sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
+                .map_err(|e| CliError::ExecutionError(e.to_string()))?
+        };
 
         let mut result = SyncResult::new(
             markdown_files.len(),
-            plan.operations.len(),
+            sync_counts.added + sync_counts.deleted,
             config.deck_name.clone(),
             false,
         );
+        result.cards_added = sync_counts.added;
+        result.cards_deleted = sync_counts.deleted;
+        result.cards_unchanged = sync_counts.unchanged;
         result.media_copied = total_media_copied;
         result.media_skipped = total_media_skipped;
         result.media_missing = total_media_missing;
@@ -143,74 +258,61 @@ impl AnkiCli {
             media_with_dirs,
         })
     }
+}
 
-    fn plan_sync(&self, document_set: &DocumentSet, deck_name: &str) -> Result<SyncPlan, CliError> {
-        let planner = SimplePlanner;
-        let plan = planner.plan_fresh_sync(document_set, deck_name)?;
-        Ok(plan)
+/// Counts of what happened during an incremental sync.
+pub struct SyncCounts {
+    pub added: usize,
+    pub deleted: usize,
+    pub unchanged: usize,
+}
+
+/// Perform an incremental sync: read current Anki state, diff against parsed cards,
+/// and only add/delete what changed. Unchanged cards (and their reviews) are preserved.
+pub fn sync_incremental<C: AnkiWrapperCollection>(
+    parsed_cards: &[Card],
+    deck_name: &str,
+    adapter: &mut AnkiCollectionAdapter<C>,
+) -> Result<SyncCounts, Box<dyn std::error::Error>> {
+    // 1. Ensure deck exists
+    adapter
+        .ensure_deck(deck_name)
+        .map_err(|e| format!("Failed to ensure deck: {}", e))?;
+
+    // 2. Read current cards from Anki
+    let anki_cards = adapter
+        .get_cards_in_deck(deck_name)
+        .map_err(|e| format!("Failed to read deck: {}", e))?;
+
+    // 3. Compute diff
+    let diff = compute_incremental_diff(parsed_cards, &anki_cards);
+
+    // 4. Delete cards that are no longer in the markdown
+    for card_id in &diff.to_delete {
+        adapter
+            .delete_card_by_anki_id(*card_id)
+            .map_err(|e| format!("Failed to delete card: {}", e))?;
     }
 
-    fn execute_plan(&self, plan: &SyncPlan, config: &SyncConfig) -> Result<(), CliError> {
-        let executor = DefaultExecutor;
-
-        // Create the appropriate collection based on config
-        // For now, we use FakeAnkiCollection since real-anki feature requires
-        // building outside the workspace. When real-anki is enabled, this would
-        // use DefaultAnkiCollection::open_collection_path() instead.
-        #[cfg(feature = "real-anki")]
-        {
-            use anki_wrapper::DefaultAnkiCollection;
-            let collection = if let Some(path) = &config.anki_collection_path {
-                DefaultAnkiCollection::open_collection_path(path)
-                    .map_err(|e| CliError::AnkiError(e.to_string()))?
-            } else {
-                DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
-            };
-            let mut adapter = AnkiCollectionAdapter::new(collection);
-            executor
-                .execute_plan(plan, &mut adapter)
-                .map_err(|e| CliError::ExecutionError(e.to_string()))?;
-        }
-
-        #[cfg(not(feature = "real-anki"))]
-        {
-            // Without real-anki feature, we can only use FakeAnkiCollection
-            // This is useful for testing the pipeline without a real Anki installation
-            let _ = config; // suppress unused warning
-            let mut adapter = AnkiCollectionAdapter::new(FakeAnkiCollection::new());
-            executor
-                .execute_plan(plan, &mut adapter)
-                .map_err(|e| CliError::ExecutionError(e.to_string()))?;
-        }
-
-        Ok(())
+    // 5. Add new cards from the markdown
+    for card in &diff.to_add {
+        let planner_card = to_planner_card(card);
+        adapter
+            .add_card_to_deck(deck_name, &planner_card)
+            .map_err(|e| format!("Failed to add card: {}", e))?;
     }
+
+    Ok(SyncCounts {
+        added: diff.to_add.len(),
+        deleted: diff.to_delete.len(),
+        unchanged: diff.unchanged,
+    })
 }
 
 struct ParsedBatch {
     cards: Vec<Card>,
+    #[allow(dead_code)]
     source_files: Vec<String>,
     /// Per-document (document_dir, media_refs) pairs.
     media_with_dirs: Vec<(PathBuf, Vec<MediaReference>)>,
-}
-
-/// Convert a doc_parser::Card to an update_planner_parser::Card.
-fn convert_card(card: &Card) -> update_planner_parser::Card {
-    let card_type = match card.card_type {
-        doc_parser::CardType::Basic => update_planner_parser::CardType::Basic,
-        doc_parser::CardType::Bidirectional => update_planner_parser::CardType::Bidirectional,
-        doc_parser::CardType::Sequence => update_planner_parser::CardType::Sequence,
-    };
-    update_planner_parser::Card {
-        card_type,
-        fields: card.fields.clone(),
-    }
-}
-
-/// Convert parsed cards to a DocumentSet for the planner.
-fn to_document_set(batch: &ParsedBatch) -> DocumentSet {
-    DocumentSet {
-        cards: batch.cards.iter().map(convert_card).collect(),
-        source_files: batch.source_files.clone(),
-    }
 }

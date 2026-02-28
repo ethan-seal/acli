@@ -880,3 +880,252 @@ fn test_sync_sequence_front_contains_label_and_step() {
         "back should contain second step text; got: {backs:?}"
     );
 }
+
+// =============================================================================
+// Test: Incremental sync — reviews survive re-sync
+// =============================================================================
+
+/// Helper: parse markdown content and return the cards.
+fn parse_cards(content: &str) -> Vec<doc_parser::Card> {
+    let parser = MarkdownParser::new();
+    parser.parse(content).expect("failed to parse").cards
+}
+
+/// Helper: run incremental sync against a shared adapter, returning counts.
+fn run_incremental_sync(
+    content: &str,
+    deck_name: &str,
+    adapter: &mut AnkiCollectionAdapter<FakeAnkiCollection>,
+) -> acli::SyncCounts {
+    let cards = parse_cards(content);
+    acli::sync_incremental(&cards, deck_name, adapter).expect("incremental sync failed")
+}
+
+#[test]
+fn test_incremental_sync_unchanged_cards_keep_reviews() {
+    use anki_wrapper::{AnkiCollection, ReviewRating};
+
+    let content = r#"- What is Rust? -> A systems programming language
+- Who created Rust? -> Graydon Hoare
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: adds both cards
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 2);
+    assert_eq!(counts.deleted, 0);
+    assert_eq!(counts.unchanged, 0);
+    assert_eq!(adapter.inner().decks["Deck"].len(), 2);
+
+    // Simulate reviews on both cards
+    let card_ids: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+    for &cid in &card_ids {
+        adapter
+            .inner_mut()
+            .record_review(cid, ReviewRating::Good)
+            .unwrap();
+    }
+
+    // Verify reviews exist
+    for &cid in &card_ids {
+        let reviews = adapter.inner_mut().get_reviews(cid).unwrap();
+        assert_eq!(reviews.len(), 1, "expected 1 review before re-sync");
+    }
+
+    // Re-sync with identical content
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0, "no cards should be added");
+    assert_eq!(counts.deleted, 0, "no cards should be deleted");
+    assert_eq!(counts.unchanged, 2, "both cards should be unchanged");
+
+    // Verify cards are still there with same IDs
+    let card_ids_after: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+    assert_eq!(card_ids, card_ids_after, "card IDs should be preserved");
+
+    // Verify reviews are still there
+    for &cid in &card_ids {
+        let reviews = adapter.inner_mut().get_reviews(cid).unwrap();
+        assert_eq!(reviews.len(), 1, "review should survive re-sync");
+        assert_eq!(reviews[0].rating, ReviewRating::Good);
+    }
+}
+
+#[test]
+fn test_incremental_sync_add_new_cards_preserves_existing() {
+    use anki_wrapper::{AnkiCollection, ReviewRating};
+
+    let content_v1 = r#"- Card 1 -> Answer 1
+"#;
+    let content_v2 = r#"- Card 1 -> Answer 1
+- Card 2 -> Answer 2
+- Card 3 -> Answer 3
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: 1 card
+    let counts = run_incremental_sync(content_v1, "Deck", &mut adapter);
+    assert_eq!(counts.added, 1);
+
+    // Review the card
+    let card1_id = adapter.inner().decks["Deck"][0].id;
+    adapter
+        .inner_mut()
+        .record_review(card1_id, ReviewRating::Easy)
+        .unwrap();
+
+    // Second sync: adds 2 more cards
+    let counts = run_incremental_sync(content_v2, "Deck", &mut adapter);
+    assert_eq!(counts.added, 2, "2 new cards should be added");
+    assert_eq!(counts.deleted, 0, "no cards should be deleted");
+    assert_eq!(counts.unchanged, 1, "original card should be unchanged");
+    assert_eq!(adapter.inner().decks["Deck"].len(), 3);
+
+    // Original card's review is preserved
+    let reviews = adapter.inner_mut().get_reviews(card1_id).unwrap();
+    assert_eq!(reviews.len(), 1, "review on original card should survive");
+}
+
+#[test]
+fn test_incremental_sync_remove_cards_preserves_remaining() {
+    use anki_wrapper::{AnkiCollection, ReviewRating};
+
+    let content_v1 = r#"- Card 1 -> Answer 1
+- Card 2 -> Answer 2
+- Card 3 -> Answer 3
+"#;
+    let content_v2 = r#"- Card 1 -> Answer 1
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: 3 cards
+    run_incremental_sync(content_v1, "Deck", &mut adapter);
+    assert_eq!(adapter.inner().decks["Deck"].len(), 3);
+
+    // Review all cards
+    let card_ids: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+    for &cid in &card_ids {
+        adapter
+            .inner_mut()
+            .record_review(cid, ReviewRating::Good)
+            .unwrap();
+    }
+
+    // Second sync: remove 2 cards
+    let counts = run_incremental_sync(content_v2, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0);
+    assert_eq!(counts.deleted, 2, "2 cards should be deleted");
+    assert_eq!(counts.unchanged, 1, "1 card should remain unchanged");
+    assert_eq!(adapter.inner().decks["Deck"].len(), 1);
+
+    // The remaining card keeps its review
+    let remaining_id = adapter.inner().decks["Deck"][0].id;
+    let reviews = adapter.inner_mut().get_reviews(remaining_id).unwrap();
+    assert_eq!(reviews.len(), 1, "remaining card should keep its review");
+}
+
+#[test]
+fn test_incremental_sync_edited_card_loses_review() {
+    // Editing a card's content changes its identity, so the old card is deleted
+    // and a new one is added. The review on the old card is lost.
+    // This documents the known limitation.
+    use anki_wrapper::{AnkiCollection, ReviewRating};
+
+    let content_v1 = r#"- Question -> Old Answer
+"#;
+    let content_v2 = r#"- Question -> New Answer
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync
+    run_incremental_sync(content_v1, "Deck", &mut adapter);
+    let old_card_id = adapter.inner().decks["Deck"][0].id;
+
+    // Review the card
+    adapter
+        .inner_mut()
+        .record_review(old_card_id, ReviewRating::Good)
+        .unwrap();
+
+    // Edit and re-sync — card content changed, so it's a new card
+    let counts = run_incremental_sync(content_v2, "Deck", &mut adapter);
+    assert_eq!(counts.added, 1, "new version of card should be added");
+    assert_eq!(counts.deleted, 1, "old version of card should be deleted");
+    assert_eq!(counts.unchanged, 0, "no unchanged cards");
+    assert_eq!(adapter.inner().decks["Deck"].len(), 1);
+
+    // The new card has a different ID — review is lost
+    let new_card_id = adapter.inner().decks["Deck"][0].id;
+    assert_ne!(old_card_id, new_card_id, "edited card should get new ID");
+
+    let new_reviews = adapter.inner_mut().get_reviews(new_card_id).unwrap();
+    assert!(
+        new_reviews.is_empty(),
+        "edited card should have no reviews (review history is lost on edit)"
+    );
+
+    // Old card's review is orphaned in the reviews map
+    let old_reviews = adapter.inner_mut().get_reviews(old_card_id).unwrap();
+    assert_eq!(
+        old_reviews.len(),
+        1,
+        "old card's review still exists but card is gone"
+    );
+}
+
+#[test]
+fn test_incremental_sync_multiple_resyncs_are_stable() {
+    // Syncing the same content 3 times should be a no-op after the first.
+    let content = r#"- A -> 1
+- B -> 2
+- C -> 3
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 3);
+    let card_ids_v1: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+
+    // Second sync — no changes
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0);
+    assert_eq!(counts.deleted, 0);
+    assert_eq!(counts.unchanged, 3);
+    let card_ids_v2: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+    assert_eq!(card_ids_v1, card_ids_v2);
+
+    // Third sync — still no changes
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0);
+    assert_eq!(counts.deleted, 0);
+    assert_eq!(counts.unchanged, 3);
+    let card_ids_v3: Vec<_> = adapter.inner().decks["Deck"].iter().map(|c| c.id).collect();
+    assert_eq!(card_ids_v1, card_ids_v3);
+}
+
+#[test]
+fn test_incremental_sync_duplicate_cards_handled() {
+    // If the markdown has two identical cards, both should be created on first sync,
+    // and both should be matched on re-sync.
+    let content = r#"- Same Question -> Same Answer
+- Same Question -> Same Answer
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: both duplicates are added
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 2);
+    assert_eq!(adapter.inner().decks["Deck"].len(), 2);
+
+    // Re-sync: both should match as unchanged
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0);
+    assert_eq!(counts.deleted, 0);
+    assert_eq!(counts.unchanged, 2);
+}

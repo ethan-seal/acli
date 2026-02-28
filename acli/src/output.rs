@@ -4,6 +4,9 @@ use std::fmt;
 pub struct SyncResult {
     pub files_processed: usize,
     pub cards_synced: usize,
+    pub cards_added: usize,
+    pub cards_deleted: usize,
+    pub cards_unchanged: usize,
     pub deck_name: String,
     pub dry_run: bool,
     pub media_copied: usize,
@@ -21,6 +24,9 @@ impl SyncResult {
         Self {
             files_processed,
             cards_synced,
+            cards_added: 0,
+            cards_deleted: 0,
+            cards_unchanged: 0,
             deck_name,
             dry_run,
             media_copied: 0,
@@ -40,6 +46,13 @@ impl fmt::Display for SyncResult {
             self.deck_name,
             if self.dry_run { "yes" } else { "no" }
         )?;
+        if !self.dry_run {
+            write!(
+                f,
+                "\n  Cards added: {}\n  Cards deleted: {}\n  Cards unchanged: {}",
+                self.cards_added, self.cards_deleted, self.cards_unchanged
+            )?;
+        }
         let total_media = self.media_copied + self.media_skipped + self.media_missing;
         if total_media > 0 {
             write!(

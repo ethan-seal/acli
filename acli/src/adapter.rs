@@ -4,8 +4,8 @@
 //! implementation and implements `update_planner_parser::executor::AnkiCollection`.
 
 use anki_wrapper::{
-    AnkiCollection as AnkiWrapperCollection, Card as AnkiWrapperCard,
-    CardType as AnkiWrapperCardType, DeckConfig, FakeAnkiCollection,
+    AnkiCollection as AnkiWrapperCollection, Card as AnkiWrapperCard, CardId as AnkiCardId,
+    CardInfo, CardType as AnkiWrapperCardType, DeckConfig, FakeAnkiCollection,
 };
 use update_planner_parser::executor::AnkiCollection as ExecutorCollection;
 use update_planner_parser::types::{
@@ -40,6 +40,61 @@ impl<C> AnkiCollectionAdapter<C> {
     }
 }
 
+impl<C: AnkiWrapperCollection> AnkiCollectionAdapter<C> {
+    /// Ensure a deck exists, creating it if needed.
+    pub fn ensure_deck(&mut self, deck_name: &str) -> Result<(), C::Error> {
+        let deck = DeckConfig {
+            name: deck_name.to_string(),
+        };
+        self.inner.ensure_deck(&deck)
+    }
+
+    /// Get all cards currently in the given deck.
+    /// Returns an empty vec if the deck doesn't exist.
+    pub fn get_cards_in_deck(&mut self, deck_name: &str) -> Result<Vec<CardInfo>, C::Error> {
+        let deck = DeckConfig {
+            name: deck_name.to_string(),
+        };
+        match self.inner.get_cards_in_deck(&deck) {
+            Ok(cards) => Ok(cards),
+            Err(e) => {
+                // If deck doesn't exist, return empty — caller will create it
+                let err_str = format!("{}", e);
+                if err_str.contains("not found") {
+                    Ok(Vec::new())
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Delete a card by its Anki database ID.
+    pub fn delete_card_by_anki_id(&mut self, card_id: AnkiCardId) -> Result<(), C::Error> {
+        self.inner.delete_card(card_id)
+    }
+
+    /// Add a card to a deck. Converts the planner card to HTML for Anki display.
+    pub fn add_card_to_deck(
+        &mut self,
+        deck_name: &str,
+        card: &PlannerCard,
+    ) -> Result<(), C::Error> {
+        let deck = DeckConfig {
+            name: deck_name.to_string(),
+        };
+        let anki_card = convert_card(card);
+        self.inner.add_card(&deck, &anki_card)
+    }
+
+    /// Save/persist changes.
+    pub fn save(&mut self) -> Result<(), C::Error> {
+        // Real Anki backend commits immediately; fake has nothing to do.
+        // This is a no-op but keeps the API consistent.
+        Ok(())
+    }
+}
+
 impl AnkiCollectionAdapter<FakeAnkiCollection> {
     /// Create a new adapter with a fake in-memory collection (for testing).
     pub fn fake() -> Self {
@@ -48,10 +103,11 @@ impl AnkiCollectionAdapter<FakeAnkiCollection> {
 }
 
 /// Convert plain text to HTML for Anki display.
+/// Public so that sync logic can convert parsed cards to HTML for comparison.
 ///
 /// Detects markdown-style hierarchical lists (lines starting with "- " with 4-space indentation)
 /// and converts them to nested HTML lists. Other text is escaped and newlines become `<br>`.
-fn text_to_html(text: &str) -> String {
+pub fn text_to_html(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
 
     // Check if this looks like a hierarchical markdown list
@@ -124,7 +180,7 @@ fn text_to_html(text: &str) -> String {
 
 /// Convert a planner Card to an anki-wrapper Card.
 /// Field content is converted to HTML for proper multi-line display in Anki.
-fn convert_card(card: &PlannerCard) -> AnkiWrapperCard {
+pub fn convert_card(card: &PlannerCard) -> AnkiWrapperCard {
     let card_type = match card.card_type {
         PlannerCardType::Basic => AnkiWrapperCardType::Basic,
         PlannerCardType::Bidirectional => AnkiWrapperCardType::BasicReversed,

@@ -9,6 +9,7 @@ dependencies = [
  "anki-wrapper",
  "clap",
  "doc-parser",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "update-planner-parser",

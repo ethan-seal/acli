@@ -13,7 +13,7 @@ import { $ } from "bun";
 
 import { sleep } from "./anki-controller";
 import { DEMO_SCENARIO, type Phase } from "./scenario";
-import { saveReport, type DemoReport, type PhaseResult, type CardData } from "./report";
+import { saveReport, type DemoReport, type PhaseResult, type CardData, type ReviewTestResult } from "./report";
 
 // Get the directory where this script is located
 const SCRIPT_DIR = import.meta.dir;
@@ -134,6 +134,7 @@ async function queryCards(
       back: raw.back,
       cardType: raw.cardType === "reversible" ? "reversible" : "one-way",
       path: raw.deckPath,
+      cardId: raw.cardId,
     }));
 
     console.log(`  Found ${cards.length} cards in collection`);
@@ -277,6 +278,158 @@ async function runPhase(
   };
 }
 
+// === Review preservation test ===
+
+async function runReviewCard(
+  config: Config,
+  cardId: number,
+  rating: string
+): Promise<{ output: string; exitCode: number }> {
+  const cmd = [
+    config.acliBinary,
+    "review-card",
+    "--card-id",
+    String(cardId),
+    "--rating",
+    rating,
+    "--collection",
+    config.collectionPath,
+  ];
+
+  console.log(`  Running: ${cmd.join(" ")}`);
+  try {
+    const result = await $`${cmd}`.quiet().nothrow();
+    const output = result.stdout.toString() + result.stderr.toString();
+    return { output: output.trim(), exitCode: result.exitCode };
+  } catch (e) {
+    return { output: `ERROR: ${e}`, exitCode: 1 };
+  }
+}
+
+async function runGetReviews(
+  config: Config,
+  cardId: number
+): Promise<{ reviews: any[]; output: string; exitCode: number }> {
+  const cmd = [
+    config.acliBinary,
+    "get-reviews",
+    "--card-id",
+    String(cardId),
+    "--collection",
+    config.collectionPath,
+  ];
+
+  console.log(`  Running: ${cmd.join(" ")}`);
+  try {
+    const result = await $`${cmd}`.quiet().nothrow();
+    const stdout = result.stdout.toString().trim();
+    const stderr = result.stderr.toString().trim();
+
+    if (result.exitCode !== 0) {
+      return { reviews: [], output: stderr || stdout, exitCode: result.exitCode };
+    }
+
+    try {
+      const reviews = JSON.parse(stdout);
+      return { reviews, output: stdout, exitCode: 0 };
+    } catch {
+      return { reviews: [], output: stdout, exitCode: 0 };
+    }
+  } catch (e) {
+    return { reviews: [], output: `ERROR: ${e}`, exitCode: 1 };
+  }
+}
+
+async function testReviewPreservation(
+  config: Config,
+  deckName: string,
+  markdownContent: string
+): Promise<ReviewTestResult> {
+  console.log(`\n${"=".repeat(60)}`);
+  console.log("Review Preservation Test");
+  console.log(`${"=".repeat(60)}`);
+
+  // 1. Query cards to get a card ID
+  console.log("\nStep 1: Finding a card to review...");
+  const cards = await queryCards(config, deckName);
+  if (cards.length === 0) {
+    return {
+      cardId: 0,
+      reviewsBefore: 0,
+      reviewsAfter: 0,
+      passed: false,
+      details: "No cards found in deck to test review preservation",
+    };
+  }
+
+  const testCard = cards[0];
+  const cardId = testCard.cardId || 0;
+  if (!cardId) {
+    return {
+      cardId: 0,
+      reviewsBefore: 0,
+      reviewsAfter: 0,
+      passed: false,
+      details: "Card has no cardId — cannot test review preservation",
+    };
+  }
+
+  console.log(`  Selected card ${cardId} (front: ${testCard.front.substring(0, 50)}...)`);
+
+  // 2. Record a review
+  console.log("\nStep 2: Recording a review...");
+  const reviewResult = await runReviewCard(config, cardId, "good");
+  if (reviewResult.exitCode !== 0) {
+    return {
+      cardId,
+      reviewsBefore: 0,
+      reviewsAfter: 0,
+      passed: false,
+      details: `Failed to record review: ${reviewResult.output}`,
+    };
+  }
+
+  // 3. Verify the review exists
+  console.log("\nStep 3: Verifying review was recorded...");
+  const beforeResult = await runGetReviews(config, cardId);
+  const reviewsBefore = beforeResult.reviews.length;
+  console.log(`  Found ${reviewsBefore} review(s) before re-sync`);
+
+  if (reviewsBefore === 0) {
+    return {
+      cardId,
+      reviewsBefore: 0,
+      reviewsAfter: 0,
+      passed: false,
+      details: "Review was not recorded (get-reviews returned 0 reviews)",
+    };
+  }
+
+  // 4. Re-sync the same content
+  console.log("\nStep 4: Re-syncing same content...");
+  await writeMarkdown(config, markdownContent);
+  const syncResult = await runAcliSync(config, deckName);
+  console.log(`  Sync exit code: ${syncResult.exitCode}`);
+  if (syncResult.output) {
+    console.log(`  Sync output: ${syncResult.output.substring(0, 200)}`);
+  }
+
+  // 5. Check reviews survived
+  console.log("\nStep 5: Checking reviews survived re-sync...");
+  const afterResult = await runGetReviews(config, cardId);
+  const reviewsAfter = afterResult.reviews.length;
+  console.log(`  Found ${reviewsAfter} review(s) after re-sync`);
+
+  const passed = reviewsAfter >= reviewsBefore;
+  const details = passed
+    ? `Review preserved: ${reviewsBefore} review(s) before, ${reviewsAfter} after re-sync`
+    : `REVIEW LOST: ${reviewsBefore} review(s) before, ${reviewsAfter} after re-sync`;
+
+  console.log(`\n  Result: ${passed ? "PASSED" : "FAILED"} — ${details}`);
+
+  return { cardId, reviewsBefore, reviewsAfter, passed, details };
+}
+
 async function getAcliVersion(acliBinary: string): Promise<string> {
   try {
     const result = await $`${acliBinary} --version`.quiet().nothrow();
@@ -365,12 +518,22 @@ Options:
   // Run each phase
   const phaseResults: PhaseResult[] = [];
   let prevMarkdown = "";
+  let reviewTestResult: ReviewTestResult | null = null;
 
   for (let i = 0; i < DEMO_SCENARIO.phases.length; i++) {
     const phase = DEMO_SCENARIO.phases[i];
     const result = await runPhase(config, phase, i, prevMarkdown);
     phaseResults.push(result);
     prevMarkdown = phase.markdownContent;
+
+    // Run review preservation test after the initial sync phase
+    if (phase.name === "initial") {
+      reviewTestResult = await testReviewPreservation(
+        config,
+        DEMO_SCENARIO.deckName,
+        phase.markdownContent
+      );
+    }
   }
 
   // Generate report
@@ -384,6 +547,7 @@ Options:
     generatedAt: new Date(),
     phases: phaseResults,
     acliVersion: await getAcliVersion(config.acliBinary),
+    reviewTest: reviewTestResult,
   };
 
   const reportPath = `${config.outputDir}/demo_report.html`;
@@ -391,6 +555,13 @@ Options:
 
   console.log("\nDemo complete!");
   console.log(`Report: ${reportPath}`);
+
+  // Fail the demo if the review preservation test failed
+  if (reviewTestResult && !reviewTestResult.passed) {
+    console.error("\nERROR: Review preservation test FAILED!");
+    console.error(`  ${reviewTestResult.details}`);
+    process.exit(1);
+  }
 }
 
 main().catch((e) => {

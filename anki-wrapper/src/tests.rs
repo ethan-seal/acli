@@ -1,6 +1,6 @@
 use crate::collection::{AnkiCollection, FakeAnkiCollection};
-use crate::types::{Card, CardType, DeckConfig};
 use crate::error::AnkiWrapperError;
+use crate::types::{Card, CardType, DeckConfig, ReviewRating};
 
 #[test]
 fn fake_collection_adds_and_clears_cards() {
@@ -94,4 +94,88 @@ fn fake_collection_ensure_vs_create() {
     // create_deck on existing deck should fail
     let result = col.create_deck(&deck);
     assert!(result.is_err());
+}
+
+#[test]
+fn fake_collection_record_and_get_reviews() {
+    let mut col = FakeAnkiCollection::new();
+    let deck = DeckConfig {
+        name: "ReviewDeck".to_string(),
+    };
+    col.ensure_deck(&deck).unwrap();
+    let card = Card {
+        card_type: CardType::Basic,
+        fields: vec!["Q".into(), "A".into()],
+    };
+    col.add_card(&deck, &card).unwrap();
+    let card_id = col.decks[&deck.name][0].id;
+
+    // No reviews yet
+    let reviews = col.get_reviews(card_id).unwrap();
+    assert!(
+        reviews.is_empty(),
+        "expected no reviews before any are recorded"
+    );
+
+    // Record a review
+    col.record_review(card_id, ReviewRating::Good).unwrap();
+    let reviews = col.get_reviews(card_id).unwrap();
+    assert_eq!(reviews.len(), 1);
+    assert_eq!(reviews[0].card_id, card_id);
+    assert_eq!(reviews[0].rating, ReviewRating::Good);
+
+    // Record another review with a different rating
+    col.record_review(card_id, ReviewRating::Again).unwrap();
+    let reviews = col.get_reviews(card_id).unwrap();
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[1].rating, ReviewRating::Again);
+}
+
+#[test]
+fn fake_collection_record_review_requires_existing_card() {
+    let mut col = FakeAnkiCollection::new();
+    use crate::types::CardId;
+    let nonexistent = CardId(999);
+    let result = col.record_review(nonexistent, ReviewRating::Good);
+    assert!(result.is_err());
+    match result {
+        Err(AnkiWrapperError::CardNotFound { id }) => assert_eq!(id, nonexistent),
+        _ => panic!("expected CardNotFound error"),
+    }
+}
+
+#[test]
+fn fake_collection_reviews_survive_clear_deck() {
+    // This test documents the CURRENT (broken) behavior: clear_deck wipes cards,
+    // which means reviews for those card IDs are orphaned.
+    // Once incremental sync is implemented, this test should be updated to assert
+    // that reviews for unchanged cards are preserved across a re-sync.
+    let mut col = FakeAnkiCollection::new();
+    let deck = DeckConfig {
+        name: "Deck".to_string(),
+    };
+    col.ensure_deck(&deck).unwrap();
+    let card = Card {
+        card_type: CardType::Basic,
+        fields: vec!["Q".into(), "A".into()],
+    };
+    col.add_card(&deck, &card).unwrap();
+    let card_id = col.decks[&deck.name][0].id;
+
+    // Simulate a review
+    col.record_review(card_id, ReviewRating::Good).unwrap();
+    assert_eq!(col.get_reviews(card_id).unwrap().len(), 1);
+
+    // clear_deck removes the cards but reviews remain in the HashMap
+    col.clear_deck(&deck).unwrap();
+    assert_eq!(col.decks[&deck.name].len(), 0, "cards should be cleared");
+
+    // Reviews are still in the map — but the card they belong to no longer exists.
+    // This is the data loss that incremental sync must prevent.
+    let orphaned_reviews = col.get_reviews(card_id).unwrap();
+    assert_eq!(
+        orphaned_reviews.len(),
+        1,
+        "reviews are orphaned (card gone, reviews remain) — incremental sync should prevent this"
+    );
 }
