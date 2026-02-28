@@ -8,7 +8,7 @@
 /**
  * Card type matching the Rust CardType enum.
  */
-export type CardType = "Basic" | "Bidirectional";
+export type CardType = "Basic" | "Bidirectional" | "Sequence";
 
 /**
  * A card with its fields, matching the Rust Card struct.
@@ -26,35 +26,197 @@ export type CardId = string;
 
 /**
  * Parse markdown into cards, matching the behavior of doc-parser.
- * This extracts cards from bullet points with -> or <-> syntax.
+ *
+ * Handles:
+ *   - Basic cards:         `- Question -> Answer`
+ *   - Bidirectional cards: `- Question <-> Answer`
+ *   - Attribute cards:     heading (`# Subject`) followed by `- key -> value` items
+ *   - Sequence cards:      label line followed by `=> step` lines
+ *   - Pipe-table cards:    `subject | col <->` header + data rows
  */
 export function parseCards(markdown: string): Card[] {
   const cards: Card[] = [];
   const lines = markdown.split("\n");
-  
-  for (const line of lines) {
+
+  // ── Pass 1: pipe-table cards ──────────────────────────────────────────────
+  // Collect indices consumed by pipe-table blocks so they are skipped later.
+  const consumedByTable = new Set<number>();
+
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].includes("|")) {
+      const blockStart = i;
+      while (i < lines.length && lines[i].includes("|")) {
+        i++;
+      }
+      const blockEnd = i;
+      if (blockEnd - blockStart < 2) continue;
+
+      // Parse header row.
+      const headerCells = lines[blockStart].split("|").map((s) => s.trim()).filter(Boolean);
+      if (headerCells.length < 2) continue;
+
+      const subjectHeader = headerCells[0];
+      type Arrow = "bidir" | "fwd" | "bwd";
+
+      const valueCols: Array<{ name: string; arrow: Arrow }> = [];
+      for (const cell of headerCells.slice(1)) {
+        if (cell.endsWith(" <->") || cell.endsWith("<->")) {
+          valueCols.push({ name: cell.replace(/<->$/, "").replace(/ <->$/, "").trim(), arrow: "bidir" });
+        } else if (cell.endsWith(" ->") || cell.endsWith("->")) {
+          valueCols.push({ name: cell.replace(/->$/, "").replace(/ ->$/, "").trim(), arrow: "fwd" });
+        } else if (cell.endsWith(" <-") || cell.endsWith("<-")) {
+          valueCols.push({ name: cell.replace(/<-$/, "").replace(/ <-$/, "").trim(), arrow: "bwd" });
+        } else {
+          valueCols.push({ name: cell, arrow: "fwd" }); // display-only — skipped below
+        }
+      }
+
+      const anyArrow = valueCols.some(
+        (c) => c.arrow === "bidir" || c.arrow === "fwd" || c.arrow === "bwd"
+      );
+      if (!anyArrow) continue;
+
+      for (let r = blockStart + 1; r < blockEnd; r++) {
+        const cells = lines[r].split("|").map((s) => s.trim()).filter(Boolean);
+        if (cells.length === 0) continue;
+        const rowValue = cells[0];
+        if (!rowValue) continue;
+
+        for (let c = 0; c < valueCols.length; c++) {
+          const col = valueCols[c];
+          const cellValue = cells[c + 1] ?? "";
+          if (!cellValue) continue;
+
+          const context = `${subjectHeader} → ${col.name}`;
+
+          if (col.arrow === "bidir" || col.arrow === "fwd") {
+            cards.push({
+              cardType: "Basic",
+              fields: [`${context}\n${rowValue} →?`, cellValue],
+            });
+          }
+          if (col.arrow === "bidir" || col.arrow === "bwd") {
+            cards.push({
+              cardType: "Basic",
+              fields: [`${context}\n? ← ${cellValue}`, rowValue],
+            });
+          }
+        }
+
+        consumedByTable.add(r);
+      }
+      consumedByTable.add(blockStart);
+    } else {
+      i++;
+    }
+  }
+
+  // ── Pass 2: sequence cards ────────────────────────────────────────────────
+  const consumedBySeq = new Set<number>();
+
+  const isSeqLine = (l: string) => {
+    const t = l.trimStart();
+    return t.startsWith("=> ") || t === "=>";
+  };
+  const stripSeqPrefix = (l: string) =>
+    l.trimStart().replace(/^=> ?/, "").trim();
+  const isStructural = (l: string) => {
+    const t = l.trim();
+    return (
+      t.startsWith("#") ||
+      t.startsWith("-") ||
+      t.startsWith("*") ||
+      t.startsWith(">") ||
+      t.startsWith("```") ||
+      t.startsWith("~~~")
+    );
+  };
+
+  i = 0;
+  while (i < lines.length) {
+    if (!consumedByTable.has(i) && isSeqLine(lines[i])) {
+      const blockStart = i;
+      while (i < lines.length && isSeqLine(lines[i])) i++;
+      const blockEnd = i;
+
+      // Find label: nearest non-empty, non-structural, non-sequence line above.
+      let labelIdx = -1;
+      let label = "";
+      for (let k = blockStart - 1; k >= 0; k--) {
+        const t = lines[k].trim();
+        if (t === "") continue;
+        if (isSeqLine(lines[k]) || isStructural(lines[k])) break;
+        labelIdx = k;
+        label = t;
+        break;
+      }
+
+      if (labelIdx === -1) continue;
+
+      const steps = lines.slice(blockStart, blockEnd).map(stripSeqPrefix);
+      steps.forEach((step, idx) => {
+        const front =
+          idx === 0
+            ? `${label}\nFirst:`
+            : `${label}\nAfter: ${steps[idx - 1]}`;
+        cards.push({ cardType: "Sequence", fields: [front, step] });
+      });
+
+      consumedBySeq.add(labelIdx);
+      for (let k = blockStart; k < blockEnd; k++) consumedBySeq.add(k);
+    } else {
+      i++;
+    }
+  }
+
+  // ── Pass 3: inline list cards (basic / bidir / attribute) ─────────────────
+  let currentHeading: string | null = null;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (consumedByTable.has(idx) || consumedBySeq.has(idx)) continue;
+
+    const line = lines[idx];
     const trimmed = line.trim();
-    
-    // Look for bidirectional cards: "Question <-> Answer"
+
+    // Track headings for attribute-card context.
+    const headingMatch = trimmed.match(/^#{1,6}\s+(.+)$/);
+    if (headingMatch) {
+      currentHeading = headingMatch[1].trim();
+      continue;
+    }
+
+    // Bidirectional: `- Q <-> A`
     const bidirMatch = trimmed.match(/^-\s+(.+?)\s+<->\s+(.+)$/);
     if (bidirMatch) {
       cards.push({
         cardType: "Bidirectional",
-        fields: [bidirMatch[1].trim(), bidirMatch[2].trim()],
+        fields: [`${bidirMatch[1].trim()} <-> ?`, bidirMatch[2].trim()],
       });
       continue;
     }
-    
-    // Look for basic cards: "Question -> Answer"
+
+    // Basic / attribute: `- key -> value`
     const basicMatch = trimmed.match(/^-\s+(.+?)\s+->\s+(.+)$/);
     if (basicMatch) {
-      cards.push({
-        cardType: "Basic",
-        fields: [basicMatch[1].trim(), basicMatch[2].trim()],
-      });
+      const key = basicMatch[1].trim();
+      const value = basicMatch[2].trim();
+      // Attribute card: top-level list item directly under a heading.
+      const isTopLevel = !line.match(/^\s{4,}/); // no deep indent
+      if (currentHeading && isTopLevel) {
+        cards.push({
+          cardType: "Basic",
+          fields: [`${currentHeading}\n${key} →?`, value],
+        });
+      } else {
+        cards.push({
+          cardType: "Basic",
+          fields: [`${key} -> ?`, value],
+        });
+      }
     }
   }
-  
+
   return cards;
 }
 
@@ -166,6 +328,10 @@ function escapeHtml(text: string): string {
  * Format a card for display in the diff.
  */
 function formatCard(card: Card): string {
+  if (card.cardType === "Sequence") {
+    // fields[0] is the two-line front (label + "First:" / "After: …")
+    return `${card.fields[0].replace("\n", " | ")} => ${card.fields[1]}`;
+  }
   const arrow = card.cardType === "Bidirectional" ? "<->" : "->";
   return `${card.fields[0]} ${arrow} ${card.fields[1]}`;
 }
@@ -182,7 +348,8 @@ export function getCardDiffHtml(oldMarkdown: string, newMarkdown: string): strin
     
     for (const card of cards) {
       const formatted = formatCard(card);
-      htmlParts.push(`<span class="diff-add">+ ${escapeHtml(formatted)}</span>`);
+      const typeLabel = card.cardType === "Bidirectional" ? "[bidir]" : card.cardType === "Sequence" ? "[seq]" : "[basic]";
+      htmlParts.push(`<span class="diff-add">+ ${escapeHtml(formatted)} ${typeLabel}</span>`);
     }
     
     htmlParts.push("</pre>");
@@ -202,7 +369,7 @@ export function getCardDiffHtml(oldMarkdown: string, newMarkdown: string): strin
     htmlParts.push('</span>');
     for (const card of diff.added) {
       const formatted = formatCard(card);
-      const typeLabel = card.cardType === "Bidirectional" ? "[bidir]" : "[basic]";
+      const typeLabel = card.cardType === "Bidirectional" ? "[bidir]" : card.cardType === "Sequence" ? "[seq]" : "[basic]";
       htmlParts.push(`<span class="diff-add">+ ${escapeHtml(formatted)} ${typeLabel}</span>`);
     }
   }
@@ -217,7 +384,7 @@ export function getCardDiffHtml(oldMarkdown: string, newMarkdown: string): strin
     htmlParts.push('</span>');
     for (const card of diff.deleted) {
       const formatted = formatCard(card);
-      const typeLabel = card.cardType === "Bidirectional" ? "[bidir]" : "[basic]";
+      const typeLabel = card.cardType === "Bidirectional" ? "[bidir]" : card.cardType === "Sequence" ? "[seq]" : "[basic]";
       htmlParts.push(`<span class="diff-del">- ${escapeHtml(formatted)} ${typeLabel}</span>`);
     }
   }

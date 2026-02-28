@@ -2,9 +2,9 @@
  * Demo scenario definitions for acli.
  *
  * Defines the phases of the demo:
- * 1. Initial sync - Create some cards from markdown
- * 2. Add cards - Add new cards to the markdown
- * 3. Update cards - Modify existing cards
+ * 1. Initial sync - Create cards using basic (->) and bidirectional (<->) syntax
+ * 2. Add cards    - Add sequence (=>) and attribute (heading + ->) cards
+ * 3. Update cards - Add pipe-table cards; modify existing content
  * 4. Delete cards - Remove some cards
  */
 
@@ -29,7 +29,7 @@ export const DEMO_SCENARIO: Scenario = {
     {
       name: "initial",
       description: "Initial sync - Creating cards from markdown",
-      changeSummary: "Starting fresh with 4 vocabulary cards",
+      changeSummary: "Starting fresh with 4 vocabulary cards (basic and bidirectional)",
       expectedCardCount: 4,
       markdownContent: `- Spanish Vocabulary
     - Greetings
@@ -42,51 +42,81 @@ export const DEMO_SCENARIO: Scenario = {
     },
     {
       name: "add",
-      description: "Adding new cards",
-      changeSummary: "Added 3 new cards: 'Three', 'Good morning', 'Good night'",
-      expectedCardCount: 7,
+      description: "Adding new card types: sequence and attribute cards",
+      changeSummary:
+        "Added 3 sequence cards for a process and 3 attribute cards under a heading",
+      expectedCardCount: 10,
       markdownContent: `- Spanish Vocabulary
     - Greetings
         - Hello <-> Hola
         - Goodbye <-> Adios
-        - Good morning <-> Buenos dias
-        - Good night <-> Buenas noches
     - Numbers
         - One -> Uno
         - Two -> Dos
-        - Three -> Tres
+
+# Photosynthesis
+- inputs -> CO2 + H2O + sunlight
+- outputs -> glucose + oxygen
+- location -> chloroplasts
+
+Boot sequence
+=> power on
+=> BIOS/UEFI loads
+=> bootloader runs
 `,
     },
     {
       name: "update",
-      description: "Updating existing cards",
-      changeSummary: "Updated 'Goodbye' answer to include 'Hasta luego'",
-      expectedCardCount: 7,
+      description: "Updating existing cards and adding a pipe-table",
+      changeSummary:
+        "Updated 'Goodbye' to include 'Hasta luego'; added a verb-conjugation pipe table (6 cards)",
+      expectedCardCount: 16,
       markdownContent: `- Spanish Vocabulary
     - Greetings
         - Hello <-> Hola
         - Goodbye <-> Adios / Hasta luego
-        - Good morning <-> Buenos dias
-        - Good night <-> Buenas noches
     - Numbers
         - One -> Uno
         - Two -> Dos
-        - Three -> Tres
+
+# Photosynthesis
+- inputs -> CO2 + H2O + sunlight
+- outputs -> glucose + oxygen
+- location -> chloroplasts
+
+Boot sequence
+=> power on
+=> BIOS/UEFI loads
+=> bootloader runs
+
+subject | conjugation <->
+yo | soy
+tú | eres
+él/ella | es
 `,
     },
     {
       name: "delete",
-      description: "Removing cards",
-      changeSummary: "Removed 'Good night' and 'Three' cards",
-      expectedCardCount: 5,
+      description: "Removing some cards",
+      changeSummary:
+        "Removed the boot-sequence block and the 'location' attribute card",
+      expectedCardCount: 12,
       markdownContent: `- Spanish Vocabulary
     - Greetings
         - Hello <-> Hola
         - Goodbye <-> Adios / Hasta luego
-        - Good morning <-> Buenos dias
     - Numbers
         - One -> Uno
         - Two -> Dos
+
+# Photosynthesis
+- inputs -> CO2 + H2O + sunlight
+- outputs -> glucose + oxygen
+
+subject | conjugation <->
+yo | soy
+tú | eres
+él/ella | es
 `,
     },
   ],
