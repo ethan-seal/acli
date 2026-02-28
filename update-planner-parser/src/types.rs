@@ -36,6 +36,8 @@ pub enum CardType {
     Basic,
     /// Bidirectional card that generates forward and reverse
     Bidirectional,
+    /// Ordered sequence card (emits a chain of Basic cards)
+    Sequence,
 }
 
 /// Minimal card representation used at planning stage.

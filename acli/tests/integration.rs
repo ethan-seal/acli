@@ -66,6 +66,7 @@ fn run_sync_pipeline(
                     doc_parser::CardType::Bidirectional => {
                         update_planner_parser::CardType::Bidirectional
                     }
+                    doc_parser::CardType::Sequence => update_planner_parser::CardType::Sequence,
                 };
                 update_planner_parser::Card {
                     card_type,
@@ -594,5 +595,91 @@ fn test_sync_fails_on_media_collision() {
     assert!(
         err_msg.contains("mona.jpg") || err_msg.contains("collision"),
         "error message should mention the collision: {err_msg}"
+    );
+}
+
+// =============================================================================
+// Test: Ordered sequence cards (=> prefix)
+// =============================================================================
+
+#[test]
+fn test_sync_sequence_cards_are_created() {
+    let content = "Troubleshoot Wi-Fi connection\n=> check Wi-Fi is enabled\n=> restart device\n=> forget network and reconnect\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("wifi.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Troubleshooting");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Troubleshooting")
+        .expect("deck not found");
+
+    assert_eq!(deck.len(), 3, "expected 3 sequence cards in deck");
+
+    // All sequence cards are stored as Basic notes in Anki.
+    for card in deck.iter() {
+        assert_eq!(
+            card.card_type,
+            anki_wrapper::CardType::Basic,
+            "sequence cards should use Basic note type"
+        );
+    }
+
+    // Verify front fields contain the label and correct prompt.
+    let fields: Vec<_> = deck.iter().map(|c| c.fields.clone()).collect();
+
+    // Card 1: "Troubleshoot Wi-Fi connection\nFirst:" (rendered as HTML)
+    let first_front = fields.iter().find(|f| f[0].contains("First:"));
+    assert!(
+        first_front.is_some(),
+        "first sequence card should contain 'First:' in front"
+    );
+
+    // Card 2 / 3: should contain "After:"
+    let after_count = fields.iter().filter(|f| f[0].contains("After:")).count();
+    assert_eq!(
+        after_count, 2,
+        "cards 2 and 3 should contain 'After:' in front"
+    );
+}
+
+#[test]
+fn test_sync_sequence_mixed_with_basic_cards() {
+    let content =
+        "Boot steps\n=> power off\n=> wait\n=> power on\n\n- Capital of France? -> Paris\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("mixed.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Mixed");
+
+    let deck = adapter.inner().decks.get("Mixed").expect("deck not found");
+
+    // 3 sequence cards + 1 basic card
+    assert_eq!(
+        deck.len(),
+        4,
+        "expected 4 cards total (3 sequence + 1 basic)"
+    );
+}
+
+#[test]
+fn test_sync_sequence_front_contains_label_and_step() {
+    let content = "Deploy procedure\n=> build the project\n=> run tests\n";
+
+    let temp_dir = setup_temp_dir_with_files(&[("deploy.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Deploy");
+
+    let deck = adapter.inner().decks.get("Deploy").expect("deck not found");
+    assert_eq!(deck.len(), 2);
+
+    // Back fields should be the step texts (possibly HTML-encoded).
+    let backs: Vec<&str> = deck.iter().map(|c| c.fields[1].as_str()).collect();
+    assert!(
+        backs.iter().any(|b| b.contains("build the project")),
+        "back should contain first step text; got: {backs:?}"
+    );
+    assert!(
+        backs.iter().any(|b| b.contains("run tests")),
+        "back should contain second step text; got: {backs:?}"
     );
 }

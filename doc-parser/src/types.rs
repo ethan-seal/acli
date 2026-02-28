@@ -38,6 +38,9 @@ pub enum CardType {
     Basic,
     /// A two-way card defined with `text <-> answer`.
     Bidirectional,
+    /// A card in an ordered sequence defined with `=> step` blocks.
+    /// Fields are `[front, back]` where front is a two-line string.
+    Sequence,
 }
 
 /// A single card with its type and fields.

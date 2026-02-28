@@ -4,6 +4,140 @@ use crate::types::{Card, CardType, MediaReference, ParsedDocument};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::HashSet;
 
+// ── Sequence pre-processor ────────────────────────────────────────────────────
+
+/// Scan `markdown` for sequence blocks (`=>` prefixed lines) and extract them
+/// as `Card` values, returning them alongside the residual text with those
+/// lines removed.
+///
+/// A sequence block is a contiguous run of lines starting with `=> ` (or `=>`)
+/// that is immediately preceded by a plain-text label line (non-empty, not
+/// starting with `=>` or common Markdown block-level characters).
+fn extract_sequence_cards(markdown: &str) -> (Vec<Card>, String) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut cards: Vec<Card> = Vec::new();
+    // Track which line indices are consumed by sequence blocks (including labels).
+    let mut consumed: Vec<bool> = vec![false; lines.len()];
+
+    let mut i = 0;
+    while i < lines.len() {
+        // Look for the start of a `=>` block.
+        if is_sequence_line(lines[i]) {
+            // Find the contiguous block of `=>` lines.
+            let block_start = i;
+            while i < lines.len() && is_sequence_line(lines[i]) {
+                i += 1;
+            }
+            let block_end = i; // exclusive
+
+            // Find the label: the nearest non-empty line immediately above the block.
+            let label_opt = find_label(&lines, block_start);
+
+            if let Some((label_idx, label)) = label_opt {
+                // Collect step texts.
+                let steps: Vec<&str> = lines[block_start..block_end]
+                    .iter()
+                    .map(|l| strip_sequence_prefix(l))
+                    .collect();
+
+                // Emit cards.
+                cards.extend(make_sequence_cards(&label, &steps));
+
+                // Mark label + all sequence lines as consumed.
+                consumed[label_idx] = true;
+                for item in consumed.iter_mut().take(block_end).skip(block_start) {
+                    *item = true;
+                }
+            }
+            // If no label found, leave lines un-consumed (they'll pass through as text).
+        } else {
+            i += 1;
+        }
+    }
+
+    // Build residual text from un-consumed lines.
+    let residual: String = lines
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !consumed[*idx])
+        .map(|(_, l)| *l)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    (cards, residual)
+}
+
+/// Returns true if `line` begins a sequence step (`=> ` or `=>`).
+fn is_sequence_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("=> ") || trimmed == "=>"
+}
+
+/// Strip the `=> ` prefix and return the step text.
+fn strip_sequence_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("=> ") {
+        rest.trim()
+    } else {
+        trimmed.strip_prefix("=>").unwrap_or(trimmed).trim()
+    }
+}
+
+/// Walk upward from `block_start` to find the label line.
+///
+/// The label is the first non-empty line immediately above the block that is
+/// not itself a sequence line and does not look like a Markdown heading, list
+/// item, or code-fence.
+fn find_label(lines: &[&str], block_start: usize) -> Option<(usize, String)> {
+    if block_start == 0 {
+        return None;
+    }
+    // Search backwards, skipping blank lines, for the immediate preceding text line.
+    let mut idx = block_start - 1;
+    loop {
+        let line = lines[idx].trim();
+        if !line.is_empty() {
+            // Must be a plain-text line — not a sequence line, heading, list marker, etc.
+            if is_sequence_line(lines[idx]) {
+                return None;
+            }
+            // Reject Markdown structural lines.
+            if line.starts_with('#')
+                || line.starts_with('-')
+                || line.starts_with('*')
+                || line.starts_with('>')
+                || line.starts_with("```")
+                || line.starts_with("~~~")
+            {
+                return None;
+            }
+            return Some((idx, line.to_string()));
+        }
+        if idx == 0 {
+            break;
+        }
+        idx -= 1;
+    }
+    None
+}
+
+/// Build the chain of `Sequence` cards from a label and an ordered list of steps.
+fn make_sequence_cards(label: &str, steps: &[&str]) -> Vec<Card> {
+    let mut cards = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        let front = if i == 0 {
+            format!("{}\nFirst:", label)
+        } else {
+            format!("{}\nAfter: {}", label, steps[i - 1])
+        };
+        cards.push(Card {
+            card_type: CardType::Sequence,
+            fields: vec![front, step.to_string()],
+        });
+    }
+    cards
+}
+
 /// Trait for parsing documents into cards.
 pub trait DocumentParser {
     /// Error type returned by the parser.
@@ -332,6 +466,11 @@ impl DocumentParser for MarkdownParser {
     type Error = ParseError;
 
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
+        // Pre-process: extract ordered-sequence blocks before passing to the
+        // Markdown parser.  The sequence lines (and their labels) are removed
+        // from the residual text so that pulldown_cmark never sees them.
+        let (sequence_cards, residual) = extract_sequence_cards(markdown);
+
         let mut state = ParseState::new();
         let mut doc = ParsedDocument::default();
         // Collect raw media refs before dedup.
@@ -339,7 +478,15 @@ impl DocumentParser for MarkdownParser {
         // Track which source_paths have already been added (for dedup).
         let mut seen_paths: HashSet<String> = HashSet::new();
 
-        for event in Parser::new_ext(markdown, Options::empty()) {
+        let parse_input = if residual.trim().is_empty() {
+            // If only sequences were present, use an empty string; we'll handle
+            // the EmptyDocument error below.
+            String::new()
+        } else {
+            residual
+        };
+
+        for event in Parser::new_ext(&parse_input, Options::empty()) {
             let card = match event {
                 Event::Start(Tag::List(_)) => {
                     state.on_start_list();
@@ -404,6 +551,13 @@ impl DocumentParser for MarkdownParser {
         }
 
         doc.media = media_refs;
+
+        // Prepend sequence cards (they appear first in the source).
+        if !sequence_cards.is_empty() {
+            let mut combined = sequence_cards;
+            combined.extend(doc.cards);
+            doc.cards = combined;
+        }
 
         if doc.cards.is_empty() {
             Err(ParseError::EmptyDocument)

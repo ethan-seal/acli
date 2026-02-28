@@ -128,6 +128,7 @@ fn convert_card(card: &PlannerCard) -> AnkiWrapperCard {
     let card_type = match card.card_type {
         PlannerCardType::Basic => AnkiWrapperCardType::Basic,
         PlannerCardType::Bidirectional => AnkiWrapperCardType::BasicReversed,
+        PlannerCardType::Sequence => AnkiWrapperCardType::Basic,
     };
     AnkiWrapperCard {
         card_type,

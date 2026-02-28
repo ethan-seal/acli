@@ -199,6 +199,7 @@ fn convert_card(card: &Card) -> update_planner_parser::Card {
     let card_type = match card.card_type {
         doc_parser::CardType::Basic => update_planner_parser::CardType::Basic,
         doc_parser::CardType::Bidirectional => update_planner_parser::CardType::Bidirectional,
+        doc_parser::CardType::Sequence => update_planner_parser::CardType::Sequence,
     };
     update_planner_parser::Card {
         card_type,

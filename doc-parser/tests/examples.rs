@@ -3,6 +3,117 @@ use doc_parser::{
 };
 use std::collections::HashSet;
 
+// ── Sequence card tests ────────────────────────────────────────────────────────
+
+#[test]
+fn test_sequence_three_steps() {
+    let input = "Troubleshoot Wi-Fi connection\n=> check Wi-Fi is enabled\n=> restart device\n=> forget network and reconnect";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 3, "expected 3 sequence cards");
+
+    // Card 1: label / First:  →  first step
+    assert_eq!(doc.cards[0].card_type, CardType::Sequence);
+    assert_eq!(
+        doc.cards[0].fields[0],
+        "Troubleshoot Wi-Fi connection\nFirst:"
+    );
+    assert_eq!(doc.cards[0].fields[1], "check Wi-Fi is enabled");
+
+    // Card 2: label / After: <step1>  →  step 2
+    assert_eq!(doc.cards[1].card_type, CardType::Sequence);
+    assert_eq!(
+        doc.cards[1].fields[0],
+        "Troubleshoot Wi-Fi connection\nAfter: check Wi-Fi is enabled"
+    );
+    assert_eq!(doc.cards[1].fields[1], "restart device");
+
+    // Card 3: label / After: <step2>  →  step 3
+    assert_eq!(doc.cards[2].card_type, CardType::Sequence);
+    assert_eq!(
+        doc.cards[2].fields[0],
+        "Troubleshoot Wi-Fi connection\nAfter: restart device"
+    );
+    assert_eq!(doc.cards[2].fields[1], "forget network and reconnect");
+}
+
+#[test]
+fn test_sequence_single_step() {
+    let input = "Boot a PC\n=> press the power button";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    assert_eq!(doc.cards[0].card_type, CardType::Sequence);
+    assert_eq!(doc.cards[0].fields[0], "Boot a PC\nFirst:");
+    assert_eq!(doc.cards[0].fields[1], "press the power button");
+}
+
+#[test]
+fn test_sequence_no_label_is_ignored() {
+    // A `=>` block at the very top of the file (no label above it) should not
+    // produce sequence cards, and because nothing else is parseable the result
+    // should be an EmptyDocument error.
+    let input = "=> step one\n=> step two";
+    let parser = MarkdownParser::new();
+    let result = parser.parse(input);
+    assert!(
+        result.is_err(),
+        "expected EmptyDocument error when sequence block has no label"
+    );
+}
+
+#[test]
+fn test_sequence_mixed_with_basic_cards() {
+    let input = "Reboot steps\n=> power off\n=> wait 10 seconds\n=> power on\n\n- Capital of France? -> Paris";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // 3 sequence cards + 1 basic card = 4 total
+    assert_eq!(doc.cards.len(), 4, "expected 3 sequence + 1 basic cards");
+
+    let seq_count = doc
+        .cards
+        .iter()
+        .filter(|c| c.card_type == CardType::Sequence)
+        .count();
+    let basic_count = doc
+        .cards
+        .iter()
+        .filter(|c| c.card_type == CardType::Basic)
+        .count();
+
+    assert_eq!(seq_count, 3);
+    assert_eq!(basic_count, 1);
+}
+
+#[test]
+fn test_sequence_card_ids_are_deterministic() {
+    let input = "Steps\n=> alpha\n=> beta";
+    let parser = MarkdownParser::new();
+    let doc1 = parser.parse(input).unwrap();
+    let doc2 = parser.parse(input).unwrap();
+
+    for (c1, c2) in doc1.cards.iter().zip(doc2.cards.iter()) {
+        assert_eq!(c1.id(), c2.id());
+    }
+}
+
+#[test]
+fn test_sequence_card_ids_differ_across_steps() {
+    let input = "Steps\n=> alpha\n=> beta";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2);
+    assert_ne!(
+        doc.cards[0].id(),
+        doc.cards[1].id(),
+        "cards in the same sequence must have distinct IDs"
+    );
+}
+
 #[test]
 fn test_basic_card() {
     let input = "One -> 1";
