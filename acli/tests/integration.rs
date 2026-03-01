@@ -1129,3 +1129,101 @@ fn test_incremental_sync_duplicate_cards_handled() {
     assert_eq!(counts.deleted, 0);
     assert_eq!(counts.unchanged, 2);
 }
+
+// ── Validate command tests ───────────────────────────────────────────────────
+
+#[test]
+fn test_validate_skips_files_without_cards() {
+    let dir = setup_temp_dir_with_files(&[
+        ("cards.md", "- Question -> Answer\n"),
+        ("readme.md", "# Just a readme\n\nNo cards here.\n"),
+    ]);
+
+    let cli = AnkiCli::new();
+    let config = acli::ValidationConfig {
+        source_dirs: vec![dir.path().to_path_buf()],
+        recursive: true,
+    };
+
+    let result = cli.validate(&config).expect("validate should succeed");
+    assert_eq!(result.total_files, 2);
+    assert_eq!(result.files_with_cards, 1);
+}
+
+#[test]
+fn test_validate_all_files_have_cards() {
+    let dir = setup_temp_dir_with_files(&[("a.md", "- Q1 -> A1\n"), ("b.md", "- Q2 -> A2\n")]);
+
+    let cli = AnkiCli::new();
+    let config = acli::ValidationConfig {
+        source_dirs: vec![dir.path().to_path_buf()],
+        recursive: true,
+    };
+
+    let result = cli.validate(&config).expect("validate should succeed");
+    assert_eq!(result.total_files, 2);
+    assert_eq!(result.files_with_cards, 2);
+}
+
+#[test]
+fn test_validate_only_files_without_cards() {
+    let dir = setup_temp_dir_with_files(&[
+        ("readme.md", "# Just notes\n"),
+        ("notes.md", "Some plain text\n"),
+    ]);
+
+    let cli = AnkiCli::new();
+    let config = acli::ValidationConfig {
+        source_dirs: vec![dir.path().to_path_buf()],
+        recursive: true,
+    };
+
+    let result = cli
+        .validate(&config)
+        .expect("validate should succeed even with no cards");
+    assert_eq!(result.total_files, 2);
+    assert_eq!(result.files_with_cards, 0);
+}
+
+#[test]
+fn test_validate_fails_on_real_parse_errors() {
+    // A file with invalid media filename should still cause a validation error
+    let dir =
+        setup_temp_dir_with_files(&[("bad.md", "- Question -> Answer ![alt](\"badfile\".png)\n")]);
+
+    let cli = AnkiCli::new();
+    let config = acli::ValidationConfig {
+        source_dirs: vec![dir.path().to_path_buf()],
+        recursive: true,
+    };
+
+    let result = cli.validate(&config);
+    assert!(
+        result.is_err(),
+        "validate should fail on invalid media filenames"
+    );
+}
+
+#[test]
+fn test_sync_skips_files_without_cards() {
+    let dir = setup_temp_dir_with_files(&[
+        ("cards.md", "- Question -> Answer\n"),
+        ("readme.md", "# No cards here\n"),
+    ]);
+
+    let cli = AnkiCli::new();
+    let config = SyncConfig {
+        source_dirs: vec![dir.path().to_path_buf()],
+        deck_name: "Test".to_string(),
+        anki_collection_path: None,
+        anki_media_dir: None,
+        recursive: true,
+        dry_run: true,
+    };
+
+    let result = cli
+        .sync(&config)
+        .expect("sync should succeed with mixed files");
+    assert_eq!(result.files_processed, 2);
+    assert_eq!(result.cards_synced, 1);
+}

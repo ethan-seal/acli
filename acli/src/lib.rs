@@ -9,4 +9,6 @@ pub mod sync;
 pub use crate::adapter::AnkiCollectionAdapter;
 pub use crate::cli::run;
 pub use crate::output::{CliOutput, SyncResult};
-pub use crate::sync::{sync_incremental, AnkiCli, SyncConfig, SyncCounts, ValidationConfig};
+pub use crate::sync::{
+    sync_incremental, AnkiCli, SyncConfig, SyncCounts, ValidationConfig, ValidationResult,
+};

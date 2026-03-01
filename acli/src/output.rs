@@ -73,8 +73,16 @@ impl CliOutput {
         println!("{result}");
     }
 
-    pub fn print_validation_success(&self, files_checked: usize) {
-        println!("✓ Validation successful ({files_checked} files)");
+    pub fn print_validation_success(&self, result: &crate::sync::ValidationResult) {
+        let skipped = result.total_files - result.files_with_cards;
+        if skipped > 0 {
+            println!(
+                "✓ Validation successful ({} files with cards, {} skipped)",
+                result.files_with_cards, skipped
+            );
+        } else {
+            println!("✓ Validation successful ({} files)", result.total_files);
+        }
     }
 
     pub fn print_error(&self, error: &dyn std::error::Error) {

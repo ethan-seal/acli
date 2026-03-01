@@ -26,6 +26,12 @@ pub struct ValidationConfig {
     pub recursive: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ValidationResult {
+    pub total_files: usize,
+    pub files_with_cards: usize,
+}
+
 /// A content-based card identity used for matching parsed cards against Anki cards.
 /// Two cards are "the same" if they have the same type and fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,10 +224,13 @@ impl AnkiCli {
         self.sync(config)
     }
 
-    pub fn validate(&self, config: &ValidationConfig) -> Result<usize, CliError> {
+    pub fn validate(&self, config: &ValidationConfig) -> Result<ValidationResult, CliError> {
         let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
-        let _ = self.parse_documents(&markdown_files)?;
-        Ok(markdown_files.len())
+        let parsed = self.parse_documents(&markdown_files)?;
+        Ok(ValidationResult {
+            total_files: markdown_files.len(),
+            files_with_cards: parsed.source_files.len(),
+        })
     }
 
     pub fn discover_files(
@@ -243,13 +252,19 @@ impl AnkiCli {
 
         for path in files {
             let content = fs::read_to_string(path)?;
-            let parsed = self.parser.parse(&content)?;
-            cards.extend(parsed.cards);
-            source_files.push(path.display().to_string());
+            match self.parser.parse(&content) {
+                Ok(parsed) => {
+                    cards.extend(parsed.cards);
+                    source_files.push(path.display().to_string());
 
-            // Collect media refs with the document's parent directory
-            let doc_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-            media_with_dirs.push((doc_dir, parsed.media));
+                    // Collect media refs with the document's parent directory
+                    let doc_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                    media_with_dirs.push((doc_dir, parsed.media));
+                }
+                // Files with no cards are silently skipped
+                Err(doc_parser::ParseError::EmptyDocument) => continue,
+                Err(e) => return Err(CliError::ParseError(e)),
+            }
         }
 
         Ok(ParsedBatch {

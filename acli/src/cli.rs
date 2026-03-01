@@ -157,8 +157,8 @@ pub fn run() -> Result<(), CliError> {
                 recursive,
             };
 
-            let files_checked = cli.validate(&config)?;
-            output.print_validation_success(files_checked);
+            let result = cli.validate(&config)?;
+            output.print_validation_success(&result);
             Ok(())
         }
         Commands::ReviewCard {
