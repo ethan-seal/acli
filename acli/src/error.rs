@@ -14,7 +14,7 @@ pub enum CliError {
     WalkdirError(#[from] walkdir::Error),
 
     #[error("Parse error: {0}")]
-    ParseError(#[from] doc_parser::ParseError),
+    ParseError(String),
 
     #[error("Plan error: {0}")]
     PlanError(#[from] update_planner_parser::PlanError),

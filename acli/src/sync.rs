@@ -5,8 +5,6 @@ use crate::adapter::{convert_card as convert_to_anki_card, AnkiCollectionAdapter
 use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
-#[cfg(not(feature = "real-anki"))]
-use anki_wrapper::FakeAnkiCollection;
 use anki_wrapper::{AnkiCollection as AnkiWrapperCollection, CardInfo, CardType as AnkiCardType};
 use doc_parser::{Card, DocumentParser, MarkdownParser, MediaReference};
 
@@ -30,6 +28,14 @@ pub struct ValidationConfig {
 pub struct ValidationResult {
     pub total_files: usize,
     pub files_with_cards: usize,
+}
+
+/// Result of previewing cards that would be synced.
+#[derive(Debug, Clone)]
+pub struct PreviewResult {
+    pub files_processed: usize,
+    pub deck_name: String,
+    pub cards: Vec<Card>,
 }
 
 /// A content-based card identity used for matching parsed cards against Anki cards.
@@ -167,61 +173,84 @@ impl AnkiCli {
             ));
         }
 
-        // Copy media files if anki_media_dir is configured
-        let mut total_media_copied = 0;
-        let mut total_media_skipped = 0;
-        let mut total_media_missing = 0;
+        // Refuse to sync when the real Anki backend is not compiled in.
+        // Without it, cards would be "synced" to an in-memory fake and then
+        // silently discarded — misleading the user into thinking they saved.
+        #[cfg(not(feature = "real-anki"))]
+        return Err(CliError::AnkiError(
+            "sync requires building with --features real-anki. \
+             Use `acli sync --dry-run` or `acli preview` to verify your cards."
+                .to_string(),
+        ));
 
-        if let Some(media_dir) = &config.anki_media_dir {
-            for (doc_dir, media_refs) in &parsed.media_with_dirs {
-                if !media_refs.is_empty() {
-                    let report = crate::media::copy_media_to_anki(doc_dir, media_refs, media_dir)?;
-                    total_media_copied += report.copied;
-                    total_media_skipped += report.skipped;
-                    total_media_missing += report.missing.len();
+        #[cfg(feature = "real-anki")]
+        {
+            // Copy media files if anki_media_dir is configured
+            let mut total_media_copied = 0;
+            let mut total_media_skipped = 0;
+            let mut total_media_missing = 0;
+
+            if let Some(media_dir) = &config.anki_media_dir {
+                for (doc_dir, media_refs) in &parsed.media_with_dirs {
+                    if !media_refs.is_empty() {
+                        let report =
+                            crate::media::copy_media_to_anki(doc_dir, media_refs, media_dir)?;
+                        total_media_copied += report.copied;
+                        total_media_skipped += report.skipped;
+                        total_media_missing += report.missing.len();
+                    }
                 }
             }
-        }
 
-        // Execute incremental sync against Anki collection
-        #[cfg(feature = "real-anki")]
-        let sync_counts = {
-            use anki_wrapper::DefaultAnkiCollection;
-            let collection = if let Some(path) = &config.anki_collection_path {
-                DefaultAnkiCollection::open_collection_path(path)
-                    .map_err(|e| CliError::AnkiError(e.to_string()))?
-            } else {
-                DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
+            // Execute incremental sync against Anki collection
+            let sync_counts = {
+                use anki_wrapper::DefaultAnkiCollection;
+                let collection = if let Some(path) = &config.anki_collection_path {
+                    DefaultAnkiCollection::open_collection_path(path)
+                        .map_err(|e| CliError::AnkiError(e.to_string()))?
+                } else {
+                    DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
+                };
+                let mut adapter = AnkiCollectionAdapter::new(collection);
+                sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
+                    .map_err(|e| CliError::ExecutionError(e.to_string()))?
             };
-            let mut adapter = AnkiCollectionAdapter::new(collection);
-            sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
-                .map_err(|e| CliError::ExecutionError(e.to_string()))?
-        };
 
-        #[cfg(not(feature = "real-anki"))]
-        let sync_counts = {
-            let mut adapter = AnkiCollectionAdapter::new(FakeAnkiCollection::new());
-            sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
-                .map_err(|e| CliError::ExecutionError(e.to_string()))?
-        };
-
-        let mut result = SyncResult::new(
-            markdown_files.len(),
-            sync_counts.added + sync_counts.deleted,
-            config.deck_name.clone(),
-            false,
-        );
-        result.cards_added = sync_counts.added;
-        result.cards_deleted = sync_counts.deleted;
-        result.cards_unchanged = sync_counts.unchanged;
-        result.media_copied = total_media_copied;
-        result.media_skipped = total_media_skipped;
-        result.media_missing = total_media_missing;
-        Ok(result)
+            let mut result = SyncResult::new(
+                markdown_files.len(),
+                sync_counts.added + sync_counts.deleted,
+                config.deck_name.clone(),
+                false,
+            );
+            result.cards_added = sync_counts.added;
+            result.cards_deleted = sync_counts.deleted;
+            result.cards_unchanged = sync_counts.unchanged;
+            result.media_copied = total_media_copied;
+            result.media_skipped = total_media_skipped;
+            result.media_missing = total_media_missing;
+            Ok(result)
+        }
     }
 
-    pub fn preview(&self, config: &SyncConfig) -> Result<SyncResult, CliError> {
-        self.sync(config)
+    /// Parse all markdown files and return the cards that would be synced.
+    pub fn preview(&self, config: &SyncConfig) -> Result<PreviewResult, CliError> {
+        let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
+        let parsed = self.parse_documents(&markdown_files)?;
+
+        // Check for media collisions (same as sync — surface errors early).
+        let all_media_refs: Vec<MediaReference> = parsed
+            .media_with_dirs
+            .iter()
+            .flat_map(|(_, refs)| refs.iter().cloned())
+            .collect();
+        crate::media::check_media_collisions(&all_media_refs)
+            .map_err(CliError::MediaCollisionError)?;
+
+        Ok(PreviewResult {
+            files_processed: markdown_files.len(),
+            deck_name: config.deck_name.clone(),
+            cards: parsed.cards,
+        })
     }
 
     pub fn validate(&self, config: &ValidationConfig) -> Result<ValidationResult, CliError> {
@@ -268,7 +297,9 @@ impl AnkiCli {
                 }
                 // Files with no cards are silently skipped
                 Err(doc_parser::ParseError::EmptyDocument) => continue,
-                Err(e) => return Err(CliError::ParseError(e)),
+                Err(e) => {
+                    return Err(CliError::ParseError(format!("{}: {}", path.display(), e)));
+                }
             }
         }
 

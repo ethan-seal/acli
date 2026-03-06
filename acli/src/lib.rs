@@ -11,5 +11,6 @@ pub use crate::adapter::AnkiCollectionAdapter;
 pub use crate::cli::run;
 pub use crate::output::{CliOutput, SyncResult};
 pub use crate::sync::{
-    sync_incremental, AnkiCli, SyncConfig, SyncCounts, ValidationConfig, ValidationResult,
+    sync_incremental, AnkiCli, PreviewResult, SyncConfig, SyncCounts, ValidationConfig,
+    ValidationResult,
 };

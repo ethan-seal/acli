@@ -74,18 +74,68 @@ impl CliOutput {
     }
 
     pub fn print_validation_success(&self, result: &crate::sync::ValidationResult) {
+        if result.total_files == 0 {
+            eprintln!("warning: no markdown files found in the current directory");
+            return;
+        }
         let skipped = result.total_files - result.files_with_cards;
         if skipped > 0 {
             println!(
-                "✓ Validation successful ({} files with cards, {} skipped)",
+                "Validation passed: {} files with cards, {} skipped",
                 result.files_with_cards, skipped
             );
         } else {
-            println!("✓ Validation successful ({} files)", result.total_files);
+            println!("Validation passed: {} files", result.total_files);
+        }
+    }
+
+    pub fn print_preview(&self, result: &crate::sync::PreviewResult) {
+        println!(
+            "Preview: {} cards from {} files -> deck \"{}\"",
+            result.cards.len(),
+            result.files_processed,
+            result.deck_name,
+        );
+        if result.cards.is_empty() {
+            return;
+        }
+        println!();
+        for (i, card) in result.cards.iter().enumerate() {
+            let type_label = match card.card_type {
+                doc_parser::CardType::Basic => "basic",
+                doc_parser::CardType::Bidirectional => "bidi",
+                doc_parser::CardType::Sequence => "sequence",
+            };
+            // Show front (first field), truncated to one line.
+            let front = card.fields.first().map(|s| s.as_str()).unwrap_or("");
+            let front_line = first_line(front);
+            // Show back (second field), truncated to one line.
+            let back = card.fields.get(1).map(|s| s.as_str()).unwrap_or("");
+            let back_line = first_line(back);
+
+            println!(
+                "  {:>3}. [{}] {} -> {}",
+                i + 1,
+                type_label,
+                front_line,
+                back_line
+            );
         }
     }
 
     pub fn print_error(&self, error: &dyn std::error::Error) {
         eprintln!("{error}");
+    }
+}
+
+/// Extract the first line of a string, truncating to 60 chars with "..." if needed.
+fn first_line(s: &str) -> String {
+    let line = s.lines().next().unwrap_or("");
+    if line.len() > 60 {
+        format!("{}...", &line[..57])
+    } else if s.lines().count() > 1 {
+        format!("{} ...", line)
+    } else {
+        line.to_string()
     }
 }

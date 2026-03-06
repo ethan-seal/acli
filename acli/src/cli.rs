@@ -31,9 +31,9 @@ enum Commands {
         #[arg(short, long)]
         media_dir: Option<PathBuf>,
 
-        /// Recurse into subdirectories.
-        #[arg(short, long)]
-        recursive: Option<bool>,
+        /// Do not recurse into subdirectories.
+        #[arg(long)]
+        no_recursive: bool,
 
         /// Show what would be synced without making changes.
         #[arg(long)]
@@ -42,9 +42,9 @@ enum Commands {
 
     /// Validate markdown files in the current directory.
     Validate {
-        /// Recurse into subdirectories.
-        #[arg(short, long)]
-        recursive: Option<bool>,
+        /// Do not recurse into subdirectories.
+        #[arg(long)]
+        no_recursive: bool,
     },
 
     /// Preview cards that would be synced (alias for sync --dry-run).
@@ -53,9 +53,9 @@ enum Commands {
         #[arg(short, long)]
         deck: Option<String>,
 
-        /// Recurse into subdirectories.
-        #[arg(short, long)]
-        recursive: Option<bool>,
+        /// Do not recurse into subdirectories.
+        #[arg(long)]
+        no_recursive: bool,
     },
 
     /// Generate a config file.
@@ -159,18 +159,23 @@ pub fn run() -> Result<(), CliError> {
             deck,
             collection,
             media_dir,
-            recursive,
+            no_recursive,
             dry_run,
         } => {
             let cfg = load_config_with_banner()?;
             let deck_name = require(deck.or(cfg.deck), "deck")?;
+            let recursive = if no_recursive {
+                false
+            } else {
+                cfg.recursive.unwrap_or(true)
+            };
 
             let config = SyncConfig {
                 source_dirs: source_dir()?,
                 deck_name,
                 anki_collection_path: collection.or(cfg.collection),
                 anki_media_dir: media_dir.or(cfg.media_dir),
-                recursive: recursive.or(cfg.recursive).unwrap_or(true),
+                recursive,
                 dry_run,
             };
 
@@ -178,29 +183,39 @@ pub fn run() -> Result<(), CliError> {
             output.print_sync_result(&result);
             Ok(())
         }
-        Commands::Preview { deck, recursive } => {
+        Commands::Preview { deck, no_recursive } => {
             let cfg = load_config_with_banner()?;
             let deck_name = require(deck.or(cfg.deck), "deck")?;
+            let recursive = if no_recursive {
+                false
+            } else {
+                cfg.recursive.unwrap_or(true)
+            };
 
             let config = SyncConfig {
                 source_dirs: source_dir()?,
                 deck_name,
                 anki_collection_path: None,
                 anki_media_dir: None,
-                recursive: recursive.or(cfg.recursive).unwrap_or(true),
+                recursive,
                 dry_run: true,
             };
 
             let result = cli.preview(&config)?;
-            output.print_sync_result(&result);
+            output.print_preview(&result);
             Ok(())
         }
-        Commands::Validate { recursive } => {
+        Commands::Validate { no_recursive } => {
             let cfg = load_config_with_banner()?;
+            let recursive = if no_recursive {
+                false
+            } else {
+                cfg.recursive.unwrap_or(true)
+            };
 
             let config = ValidationConfig {
                 source_dirs: source_dir()?,
-                recursive: recursive.or(cfg.recursive).unwrap_or(true),
+                recursive,
             };
 
             let result = cli.validate(&config)?;
