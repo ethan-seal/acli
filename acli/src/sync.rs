@@ -185,6 +185,43 @@ impl AnkiCli {
 
         #[cfg(feature = "real-anki")]
         {
+            // Require an explicit collection path — without one,
+            // DefaultAnkiCollection::new() silently opens an in-memory
+            // database and all synced cards are lost when the process exits.
+            let collection_path = config.anki_collection_path.as_ref().ok_or_else(|| {
+                CliError::ConfigError(
+                    "no Anki collection path configured.\n\
+                     Set it in your user config (~/.config/acli/config.toml):\n\
+                     \n\
+                     collection = \"/path/to/Anki2/User 1/collection.anki2\"\n\
+                     \n\
+                     Common locations:\n  \
+                       Linux:   ~/.local/share/Anki2/User 1/collection.anki2\n  \
+                       macOS:   ~/Library/Application Support/Anki2/User 1/collection.anki2\n  \
+                       Windows: %APPDATA%\\Anki2\\User 1\\collection.anki2\n\
+                     \n\
+                     Or pass --collection <path> on the command line."
+                        .to_string(),
+                )
+            })?;
+
+            // Fail if any cards reference media but no media_dir is configured.
+            let has_media_refs = parsed
+                .media_with_dirs
+                .iter()
+                .any(|(_, refs)| !refs.is_empty());
+            if has_media_refs && config.anki_media_dir.is_none() {
+                return Err(CliError::ConfigError(
+                    "cards reference media files but no media_dir is configured.\n\
+                     Set it in your user config (~/.config/acli/config.toml):\n\
+                     \n\
+                     media_dir = \"/path/to/Anki2/User 1/collection.media\"\n\
+                     \n\
+                     Or pass --media-dir <path> on the command line."
+                        .to_string(),
+                ));
+            }
+
             // Copy media files if anki_media_dir is configured
             let mut total_media_copied = 0;
             let mut total_media_skipped = 0;
@@ -205,12 +242,8 @@ impl AnkiCli {
             // Execute incremental sync against Anki collection
             let sync_counts = {
                 use anki_wrapper::DefaultAnkiCollection;
-                let collection = if let Some(path) = &config.anki_collection_path {
-                    DefaultAnkiCollection::open_collection_path(path)
-                        .map_err(|e| CliError::AnkiError(e.to_string()))?
-                } else {
-                    DefaultAnkiCollection::new().map_err(|e| CliError::AnkiError(e.to_string()))?
-                };
+                let collection = DefaultAnkiCollection::open_collection_path(collection_path)
+                    .map_err(|e| CliError::AnkiError(e.to_string()))?;
                 let mut adapter = AnkiCollectionAdapter::new(collection);
                 sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
                     .map_err(|e| CliError::ExecutionError(e.to_string()))?
