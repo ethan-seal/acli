@@ -1092,17 +1092,22 @@ impl DocumentParser for MarkdownParser {
                 }
                 Event::End(Tag::Image(_, _, _)) => {
                     if let Some((url, alt)) = state.on_end_image() {
-                        // Extract just the filename component for target_name.
-                        let target_name = std::path::Path::new(&url)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(&url)
-                            .to_string();
-                        let alt_text = if alt.is_empty() { None } else { Some(alt) };
-                        let media_ref = MediaReference::new(url.clone(), target_name, alt_text, 0)?;
-                        // Dedup: keep only the first occurrence of each source_path.
-                        if seen_paths.insert(url) {
-                            media_refs.push(media_ref);
+                        // Skip remote URLs — only local paths need media copying.
+                        let is_remote = url.starts_with("http://") || url.starts_with("https://");
+                        if !is_remote {
+                            // Extract just the filename component for target_name.
+                            let target_name = std::path::Path::new(&url)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&url)
+                                .to_string();
+                            let alt_text = if alt.is_empty() { None } else { Some(alt) };
+                            let media_ref =
+                                MediaReference::new(url.clone(), target_name, alt_text, 0)?;
+                            // Dedup: keep only the first occurrence of each source_path.
+                            if seen_paths.insert(url) {
+                                media_refs.push(media_ref);
+                            }
                         }
                     }
                     None
@@ -1263,5 +1268,30 @@ mod tests {
             "expected empty media, got: {:?}",
             doc.media
         );
+    }
+
+    #[test]
+    fn test_remote_image_url_not_treated_as_media() {
+        let input = "- ![badge](https://example.com/badge.svg?branch=main) -> answer";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert!(
+            doc.cards[0].fields[0].contains("<img"),
+            "URL image should still render as <img> in HTML"
+        );
+        assert!(
+            doc.media.is_empty(),
+            "remote URLs should not be collected as media: {:?}",
+            doc.media
+        );
+    }
+
+    #[test]
+    fn test_http_image_skipped_but_local_image_collected() {
+        let input = "- ![](https://example.com/remote.png) ![](local.jpg) -> answer";
+        let doc = MarkdownParser::new().parse(input).unwrap();
+        assert_eq!(doc.cards.len(), 1);
+        assert_eq!(doc.media.len(), 1, "only local image should be media");
+        assert_eq!(doc.media[0].source_path, "local.jpg");
     }
 }
