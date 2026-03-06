@@ -108,7 +108,7 @@ fn test_card_id_ordering() {
         fields: vec!["C".to_string(), "3".to_string()],
     };
 
-    let mut ids = vec![card2.id(), card1.id(), card3.id()];
+    let mut ids = [card2.id(), card1.id(), card3.id()];
     ids.sort();
 
     // Just verify that sorting works (we don't care about the specific order)
