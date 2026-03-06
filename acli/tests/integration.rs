@@ -1231,3 +1231,118 @@ fn test_sync_skips_files_without_cards() {
     assert_eq!(result.files_processed, 2);
     assert_eq!(result.cards_synced, 1);
 }
+
+// =============================================================================
+// Test: Block cards
+// =============================================================================
+
+#[test]
+fn test_sync_block_cards() {
+    let content = r#"
+- 30 ml Cognac
+- 30 ml Crème de Cacao
+- 30 ml Fresh Cream
+->
+Alexander
+
+- 30 ml Campari
+- 30 ml Sweet Vermouth
+- splash Soda Water
+->
+Americano
+"#;
+
+    let temp_dir = setup_temp_dir_with_files(&[("cocktails.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Cocktails");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Cocktails")
+        .expect("deck not found");
+    assert_eq!(deck.len(), 2, "expected 2 block cards");
+
+    // Verify both cocktail cards exist with correct answers
+    let alexander = deck.iter().find(|c| c.fields[1].contains("Alexander"));
+    assert!(alexander.is_some(), "Alexander card not found");
+
+    let americano = deck.iter().find(|c| c.fields[1].contains("Americano"));
+    assert!(americano.is_some(), "Americano card not found");
+
+    // Verify question contains ingredients as a list
+    let q = &alexander.unwrap().fields[0];
+    assert!(q.contains("Cognac"), "question should contain Cognac: {q}");
+    assert!(
+        q.contains("<li>"),
+        "question should be rendered as list: {q}"
+    );
+}
+
+// =============================================================================
+// Test: Templates with block cards
+// =============================================================================
+
+#[test]
+fn test_sync_template_block_cards() {
+    let content = "\
+```template\n\
+{{ ingredients }}\n\
+->\n\
+{{ name }}\n\
+```\n\
+\n\
+name | ingredients\n\
+Alexander | 30 ml Cognac, 30 ml Crème de Cacao, 30 ml Fresh Cream\n\
+Americano | 30 ml Campari, 30 ml Sweet Vermouth, splash Soda Water\n\
+Angel Face | 30 ml Gin, 30 ml Apricot Brandy, 30 ml Calvados";
+
+    let temp_dir = setup_temp_dir_with_files(&[("cocktails.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Cocktails");
+
+    let deck = adapter
+        .inner()
+        .decks
+        .get("Cocktails")
+        .expect("deck not found");
+    assert_eq!(deck.len(), 3, "expected 3 cards from template");
+
+    // Each card's answer should be the cocktail name
+    let names: Vec<&str> = vec!["Alexander", "Americano", "Angel Face"];
+    for name in &names {
+        let card = deck.iter().find(|c| c.fields[1].contains(name));
+        assert!(card.is_some(), "card for '{}' not found", name);
+    }
+
+    // Each card's question should contain the ingredients
+    let alexander = deck
+        .iter()
+        .find(|c| c.fields[1].contains("Alexander"))
+        .unwrap();
+    assert!(
+        alexander.fields[0].contains("Cognac"),
+        "question should contain ingredients"
+    );
+}
+
+#[test]
+fn test_sync_template_inline_cards() {
+    let content = "\
+```template\n\
+- {{ english }} <-> {{ spanish }}\n\
+```\n\
+\n\
+english | spanish\n\
+hello | hola\n\
+goodbye | adiós\n\
+good morning | buenos días";
+
+    let temp_dir = setup_temp_dir_with_files(&[("vocab.md", content)]);
+    let adapter = run_sync_pipeline(temp_dir.path(), "Vocab");
+
+    let deck = adapter.inner().decks.get("Vocab").expect("deck not found");
+    assert_eq!(
+        deck.len(),
+        3,
+        "expected 3 bidirectional cards from template"
+    );
+}
