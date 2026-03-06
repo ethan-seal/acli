@@ -277,7 +277,7 @@ fn test_resync_with_modified_cards() {
     let temp_dir = setup_temp_dir_with_files(&[("cards.md", content_v1)]);
     let adapter1 = run_sync_pipeline(temp_dir.path(), "Deck");
     let old_answer = &adapter1.inner().decks["Deck"][0].fields[1];
-    assert_eq!(old_answer, "Old Answer");
+    assert_eq!(old_answer, "<p>Old Answer</p>");
 
     // Update file with modified answer and re-sync
     let content_v2 = r#"- Question -> New Answer
@@ -286,7 +286,7 @@ fn test_resync_with_modified_cards() {
 
     let adapter2 = run_sync_pipeline(temp_dir.path(), "Deck");
     let new_answer = &adapter2.inner().decks["Deck"][0].fields[1];
-    assert_eq!(new_answer, "New Answer", "answer should be updated");
+    assert_eq!(new_answer, "<p>New Answer</p>", "answer should be updated");
 }
 
 // =============================================================================
@@ -312,7 +312,9 @@ fn test_sync_preserves_nested_context() {
     assert_eq!(deck.len(), 2, "expected 2 cards from nested list");
 
     // Verify context is preserved in questions
-    let rust_card = deck.iter().find(|c| c.fields[1] == "Systems language");
+    let rust_card = deck
+        .iter()
+        .find(|c| c.fields[1].contains("Systems language"));
     assert!(rust_card.is_some(), "Rust card not found");
 
     let question = &rust_card.unwrap().fields[0];
@@ -366,7 +368,9 @@ fn test_sync_with_unicode_content() {
     assert_eq!(deck.len(), 3, "expected 3 unicode cards");
 
     // Verify unicode preserved
-    let japanese_card = deck.iter().find(|c| c.fields[1] == "Hello in Japanese");
+    let japanese_card = deck
+        .iter()
+        .find(|c| c.fields[1].contains("Hello in Japanese"));
     assert!(japanese_card.is_some());
     assert!(japanese_card.unwrap().fields[0].contains("こんにちは"));
 }

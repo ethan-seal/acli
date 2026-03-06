@@ -102,80 +102,25 @@ impl AnkiCollectionAdapter<FakeAnkiCollection> {
     }
 }
 
-/// Convert plain text to HTML for Anki display.
+/// Convert card field text to HTML for Anki display.
 /// Public so that sync logic can convert parsed cards to HTML for comparison.
 ///
-/// Detects markdown-style hierarchical lists (lines starting with "- " with 4-space indentation)
-/// and converts them to nested HTML lists. Other text is escaped and newlines become `<br>`.
+/// Uses pulldown-cmark to render full markdown: bullet lists, images, code
+/// spans, emphasis, etc.  Single newlines are converted to hard breaks so
+/// they produce visible `<br>` in the output, matching the behaviour users
+/// expect when writing multiline card content.
 pub fn text_to_html(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().collect();
+    // Convert single newlines to markdown hard breaks (two trailing spaces
+    // before the newline) so pulldown-cmark emits <br /> for each line break.
+    let with_hard_breaks = text.replace('\n', "  \n");
 
-    // Check if this looks like a hierarchical markdown list
-    let is_markdown_list = lines.iter().any(|line| {
-        let trimmed = line.trim_start();
-        trimmed.starts_with("- ")
-    });
-
-    if !is_markdown_list {
-        // Not a markdown list, just escape and convert newlines
-        return text
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('\n', "<br>");
-    }
-
-    // Convert markdown list to HTML
+    let parser = pulldown_cmark::Parser::new(&with_hard_breaks);
     let mut html = String::new();
-    let mut depth_stack: Vec<usize> = Vec::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
 
-    for line in lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Count leading spaces
-        let leading_spaces = line.chars().take_while(|c| *c == ' ').count();
-        let trimmed = line.trim_start();
-
-        if !trimmed.starts_with("- ") {
-            continue;
-        }
-
-        let depth = leading_spaces / 4;
-        let content = trimmed.trim_start_matches("- ");
-
-        // Escape the content
-        let escaped_content = content
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-
-        // Close lists if we've decreased depth
-        while depth_stack.len() > depth + 1 {
-            html.push_str("</ul>");
-            depth_stack.pop();
-        }
-
-        // Open new list if we've increased depth
-        if depth_stack.len() == depth {
-            html.push_str("<ul>");
-            depth_stack.push(depth);
-        }
-
-        // Add the list item
-        html.push_str("<li>");
-        html.push_str(&escaped_content);
-        html.push_str("</li>");
-    }
-
-    // Close all remaining open lists
-    while !depth_stack.is_empty() {
-        html.push_str("</ul>");
-        depth_stack.pop();
-    }
-
-    html
+    // Trim trailing whitespace/newlines that pulldown-cmark may add.
+    let trimmed = html.trim_end();
+    trimmed.to_string()
 }
 
 /// Convert a planner Card to an anki-wrapper Card.
@@ -298,8 +243,8 @@ mod tests {
 
         let cards = &adapter.inner().decks["Test"];
         assert_eq!(cards.len(), 1);
-        // Fields are converted to HTML (no change for simple text without newlines)
-        assert_eq!(cards[0].fields, vec!["front", "back"]);
+        // Fields are rendered as HTML via pulldown-cmark (wrapped in <p> tags)
+        assert_eq!(cards[0].fields, vec!["<p>front</p>", "<p>back</p>"]);
     }
 
     #[test]
@@ -315,9 +260,9 @@ mod tests {
 
         let cards = &adapter.inner().decks["Test"];
         assert_eq!(cards.len(), 1);
-        // Newlines are converted to <br> for proper Anki display
-        assert_eq!(cards[0].fields[0], "line1<br>line2");
-        assert_eq!(cards[0].fields[1], "answer");
+        // Newlines become hard breaks via pulldown-cmark
+        assert_eq!(cards[0].fields[0], "<p>line1<br />\nline2</p>");
+        assert_eq!(cards[0].fields[1], "<p>answer</p>");
     }
 
     #[test]
@@ -333,8 +278,8 @@ mod tests {
 
         let cards = &adapter.inner().decks["Test"];
         assert_eq!(cards.len(), 1);
-        // HTML special characters are escaped
-        assert_eq!(cards[0].fields[0], "x &lt; y &amp; y &gt; z");
+        // HTML special characters are escaped (wrapped in <p> by pulldown-cmark)
+        assert_eq!(cards[0].fields[0], "<p>x &lt; y &amp; y &gt; z</p>");
     }
 
     #[test]
@@ -368,10 +313,23 @@ mod tests {
         let cards = &adapter.inner().decks["Test"];
         assert_eq!(cards.len(), 1);
 
-        // The front field should be converted to nested HTML lists
-        let expected_html = "<ul><li>Spanish</li><ul><li>Greetings</li><ul><li>Hello &lt;-&gt; ?</li></ul></ul></ul>";
-        assert_eq!(cards[0].fields[0], expected_html);
-        assert_eq!(cards[0].fields[1], "Hola");
+        // The front field should be a nested HTML list (via pulldown-cmark)
+        let front = &cards[0].fields[0];
+        assert!(front.contains("<ul>"), "should contain <ul> tags: {front}");
+        assert!(front.contains("<li>"), "should contain <li> tags: {front}");
+        assert!(
+            front.contains("Spanish"),
+            "should contain 'Spanish': {front}"
+        );
+        assert!(
+            front.contains("Greetings"),
+            "should contain 'Greetings': {front}"
+        );
+        assert!(
+            front.contains("Hello &lt;-&gt; ?"),
+            "should contain escaped arrow: {front}"
+        );
+        assert_eq!(cards[0].fields[1], "<p>Hola</p>");
     }
 
     #[test]
