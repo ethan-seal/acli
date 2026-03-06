@@ -126,4 +126,6 @@ pub struct ParsedDocument {
     pub media: Vec<MediaReference>,
     /// Optional source path for diagnostics.
     pub source_path: Option<String>,
+    /// Non-fatal warnings encountered during parsing (e.g. incomplete block cards).
+    pub warnings: Vec<String>,
 }

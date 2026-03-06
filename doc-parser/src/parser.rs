@@ -348,21 +348,21 @@ fn extract_pipe_table_cards(markdown: &str) -> (Vec<Card>, String) {
                         continue;
                     }
 
-                    // Context string: "<subject col> → <value col>"
-                    let context = format!("{} \u{2192} {}", subject_header, header.name);
+                    // Context string: "<subject col> -> <value col>"
+                    let context = format!("{} -> {}", subject_header, header.name);
 
-                    // Forward card: front = "<context>\n<row value> →?" / back = cell
+                    // Forward card: front = "<context>\n<row value> -> ?" / back = cell
                     if matches!(arrow, ArrowMarker::Bidirectional | ArrowMarker::Forward) {
-                        let front = format!("{}\n{} \u{2192}?", context, row_value);
+                        let front = format!("{}\n{} -> ?", context, row_value);
                         cards.push(Card {
                             card_type: CardType::Basic,
                             fields: vec![front, cell_value.to_string()],
                         });
                     }
 
-                    // Reverse card: front = "<context>\n? ← <cell>" / back = row value
+                    // Reverse card: front = "<context>\n? <- <cell>" / back = row value
                     if matches!(arrow, ArrowMarker::Bidirectional | ArrowMarker::Backward) {
-                        let front = format!("{}\n? \u{2190} {}", context, cell_value);
+                        let front = format!("{}\n? <- {}", context, cell_value);
                         cards.push(Card {
                             card_type: CardType::Basic,
                             fields: vec![front, row_value.to_string()],
@@ -523,9 +523,10 @@ fn find_label(lines: &[&str], block_start: usize) -> Option<(usize, String)> {
 ///
 /// Blank lines delimit the question and answer blocks.  Both sides must have
 /// at least one line of content.
-fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
+fn extract_block_cards(markdown: &str) -> (Vec<Card>, String, Vec<String>) {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut cards: Vec<Card> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     let mut consumed: Vec<bool> = vec![false; lines.len()];
 
     let mut i = 0;
@@ -539,6 +540,8 @@ fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
 
         let is_bidi = trimmed == "<->";
         let arrow_idx = i;
+        // 1-based line number for diagnostics.
+        let line_num = arrow_idx + 1;
 
         // Walk backward from the arrow to find question content.
         // Stop at a blank line (or already-consumed line, or start of file).
@@ -561,8 +564,11 @@ fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
             a_end += 1;
         }
 
+        let has_question = q_start < arrow_idx;
+        let has_answer = arrow_idx + 1 < a_end;
+
         // Both sides must have at least one line of content.
-        if q_start < arrow_idx && arrow_idx + 1 < a_end {
+        if has_question && has_answer {
             let question = lines[q_start..arrow_idx].join("\n");
             let answer = lines[arrow_idx + 1..a_end].join("\n");
 
@@ -582,9 +588,20 @@ fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
                 consumed[idx] = true;
             }
         } else {
-            // Incomplete block card (missing question or answer).
-            // Consume the arrow line so it doesn't leak through to
-            // pulldown-cmark and create a spurious inline card.
+            // Incomplete block card — report a warning and consume the arrow
+            // so it doesn't leak through to pulldown-cmark.
+            let arrow_str = if is_bidi { "<->" } else { "->" };
+            let missing = if !has_question && !has_answer {
+                "missing question and answer"
+            } else if !has_question {
+                "missing question above arrow"
+            } else {
+                "missing answer below arrow"
+            };
+            warnings.push(format!(
+                "line {}: block card `{}` {}",
+                line_num, arrow_str, missing
+            ));
             consumed[arrow_idx] = true;
         }
 
@@ -600,7 +617,7 @@ fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
         .collect::<Vec<_>>()
         .join("\n");
 
-    (cards, residual)
+    (cards, residual, warnings)
 }
 
 /// Build the chain of `Sequence` cards from a label and an ordered list of steps.
@@ -929,7 +946,7 @@ impl ParseState {
 /// paragraph. Tries `<->` before `->` so bidirectional cards are preferred.
 ///
 /// When `heading` is `Some` and the item uses `->` syntax (attribute pattern),
-/// the card front is formatted as `"{heading}\n{key} →?"` (two lines).
+/// the card front is formatted as `"{heading}\n{key} -> ?"` (two lines).
 /// `<->` items are never treated as attribute cards.
 fn make_card(
     spans: &[Span],
@@ -958,7 +975,7 @@ fn make_card(
             // Only apply heading when there is no nested list context —
             // nested items already have their own context chain.
             if context.is_empty() {
-                format!("{subject}\n{key} \u{2192}?")
+                format!("{subject}\n{key} -> ?")
             } else {
                 let question_raw = format!("{key} -> ?");
                 build_context_question(context, depth, &question_raw)
@@ -1029,7 +1046,7 @@ impl DocumentParser for MarkdownParser {
         // Pre-process: extract block cards (`->` or `<->` on its own line)
         // before the Markdown parser.  The question, arrow, and answer lines
         // are removed from the residual text.
-        let (block_cards, residual) = extract_block_cards(&after_sequences);
+        let (block_cards, residual, block_warnings) = extract_block_cards(&after_sequences);
 
         let mut state = ParseState::new();
         let mut doc = ParsedDocument::default();
@@ -1119,6 +1136,7 @@ impl DocumentParser for MarkdownParser {
         }
 
         doc.media = media_refs;
+        doc.warnings = block_warnings;
 
         // Prepend pipe-table cards, then sequence cards, then block cards,
         // then cmark cards.

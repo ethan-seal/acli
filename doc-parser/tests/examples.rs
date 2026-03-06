@@ -263,16 +263,16 @@ fn test_attribute_card_with_heading() {
         assert_eq!(card.card_type, CardType::Basic);
     }
 
-    // Front should be two lines: heading on line 1, "key →?" on line 2.
+    // Front should be two lines: heading on line 1, "key -> ?" on line 2.
     let symbol_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
-    assert_eq!(symbol_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+    assert_eq!(symbol_card.fields[0], "Hydrogen\nsymbol -> ?");
     assert_eq!(symbol_card.fields[1], "H");
 
     let atomic_card = doc.cards.iter().find(|c| c.fields[1] == "1").unwrap();
-    assert_eq!(atomic_card.fields[0], "Hydrogen\natomic number \u{2192}?");
+    assert_eq!(atomic_card.fields[0], "Hydrogen\natomic number -> ?");
 
     let phase_card = doc.cards.iter().find(|c| c.fields[1] == "gas").unwrap();
-    assert_eq!(phase_card.fields[0], "Hydrogen\nphase \u{2192}?");
+    assert_eq!(phase_card.fields[0], "Hydrogen\nphase -> ?");
 }
 
 #[test]
@@ -298,10 +298,10 @@ fn test_heading_resets_between_sections() {
     assert_eq!(doc.cards.len(), 2);
 
     let h_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
-    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol -> ?");
 
     let o_card = doc.cards.iter().find(|c| c.fields[1] == "O").unwrap();
-    assert_eq!(o_card.fields[0], "Oxygen\nsymbol \u{2192}?");
+    assert_eq!(o_card.fields[0], "Oxygen\nsymbol -> ?");
 }
 
 #[test]
@@ -328,10 +328,10 @@ fn test_attribute_card_multiple_headings_correct_subject() {
     assert_eq!(doc.cards.len(), 2);
 
     let h_card = doc.cards.iter().find(|c| c.fields[1] == "H").unwrap();
-    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol \u{2192}?");
+    assert_eq!(h_card.fields[0], "Hydrogen\nsymbol -> ?");
 
     let o_card = doc.cards.iter().find(|c| c.fields[1] == "O").unwrap();
-    assert_eq!(o_card.fields[0], "Oxygen\nsymbol \u{2192}?");
+    assert_eq!(o_card.fields[0], "Oxygen\nsymbol -> ?");
 }
 
 // ── Pipe table card tests ─────────────────────────────────────────────────────
@@ -361,24 +361,18 @@ fn test_pipe_table_bidirectional_column() {
     let fwd_yo = doc
         .cards
         .iter()
-        .find(|c| c.fields[0].contains("yo") && c.fields[0].contains("\u{2192}?"))
+        .find(|c| c.fields[0].contains("yo") && c.fields[0].contains("-> ?"))
         .expect("forward card for 'yo' not found");
-    assert_eq!(
-        fwd_yo.fields[0],
-        "subject \u{2192} conjugation\nyo \u{2192}?"
-    );
+    assert_eq!(fwd_yo.fields[0], "subject -> conjugation\nyo -> ?");
     assert_eq!(fwd_yo.fields[1], "soy");
 
     // Reverse card for "yo ← soy"
     let rev_yo = doc
         .cards
         .iter()
-        .find(|c| c.fields[0].contains("soy") && c.fields[0].contains("? \u{2190}"))
+        .find(|c| c.fields[0].contains("soy") && c.fields[0].contains("? <-"))
         .expect("reverse card for 'soy' not found");
-    assert_eq!(
-        rev_yo.fields[0],
-        "subject \u{2192} conjugation\n? \u{2190} soy"
-    );
+    assert_eq!(rev_yo.fields[0], "subject -> conjugation\n? <- soy");
     assert_eq!(rev_yo.fields[1], "yo");
 }
 
@@ -391,7 +385,7 @@ fn test_pipe_table_forward_only_column() {
     // Forward-only: 1 row × 1 direction = 1 card
     assert_eq!(doc.cards.len(), 1, "expected 1 forward-only card");
     let card = &doc.cards[0];
-    assert_eq!(card.fields[0], "term \u{2192} definition\nhello \u{2192}?");
+    assert_eq!(card.fields[0], "term -> definition\nhello -> ?");
     assert_eq!(card.fields[1], "a greeting");
 }
 
@@ -404,10 +398,7 @@ fn test_pipe_table_backward_only_column() {
     // Backward-only: 1 row × 1 direction = 1 card
     assert_eq!(doc.cards.len(), 1, "expected 1 backward-only card");
     let card = &doc.cards[0];
-    assert_eq!(
-        card.fields[0],
-        "term \u{2192} definition\n? \u{2190} a greeting"
-    );
+    assert_eq!(card.fields[0], "term -> definition\n? <- a greeting");
     assert_eq!(card.fields[1], "hello");
 }
 
@@ -474,7 +465,7 @@ fn test_pipe_table_context_uses_column_headers() {
     let pipe_cards: Vec<_> = doc
         .cards
         .iter()
-        .filter(|c| c.fields[0].contains("foo \u{2192} bar"))
+        .filter(|c| c.fields[0].contains("foo -> bar"))
         .collect();
     assert_eq!(
         pipe_cards.len(),
@@ -544,6 +535,10 @@ fn test_block_card_multiline_both_sides() {
     let doc = parser.parse(input).unwrap();
 
     assert_eq!(doc.cards.len(), 1, "expected 1 block card");
+    assert!(
+        doc.warnings.is_empty(),
+        "no warnings for well-formed block card"
+    );
     assert_eq!(
         doc.cards[0].fields[0],
         "- 30 ml Cognac\n- 30 ml Fresh Cream"
@@ -584,9 +579,9 @@ Americano";
 }
 
 #[test]
-fn test_block_card_arrow_with_no_question_ignored() {
-    // Arrow at start of file with no question content — should not produce a card.
-    // The "answer" text should pass through as regular markdown.
+fn test_block_card_arrow_with_no_question_warns() {
+    // Arrow at start of file with no question content — should not produce a card
+    // but should produce a warning.
     let input = "->\nanswer only\n\n- real question -> real answer";
     let parser = MarkdownParser::new();
     let doc = parser.parse(input).unwrap();
@@ -598,11 +593,25 @@ fn test_block_card_arrow_with_no_question_ignored() {
         "block arrow with no question should be skipped"
     );
     assert_eq!(doc.cards[0].fields[1], "real answer");
+
+    // A warning should be emitted for the incomplete block card.
+    assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
+    assert!(
+        doc.warnings[0].contains("missing question"),
+        "warning should mention missing question: {:?}",
+        doc.warnings[0]
+    );
+    assert!(
+        doc.warnings[0].contains("line 1"),
+        "warning should reference line 1: {:?}",
+        doc.warnings[0]
+    );
 }
 
 #[test]
-fn test_block_card_arrow_with_no_answer_ignored() {
-    // Arrow at end of file with no answer content — should not produce a card.
+fn test_block_card_arrow_with_no_answer_warns() {
+    // Arrow at end of file with no answer content — should not produce a card
+    // but should produce a warning.
     let input = "- real question -> real answer\n\nquestion only\n->";
     let parser = MarkdownParser::new();
     let doc = parser.parse(input).unwrap();
@@ -613,6 +622,19 @@ fn test_block_card_arrow_with_no_answer_ignored() {
         "block arrow with no answer should be skipped"
     );
     assert_eq!(doc.cards[0].fields[1], "real answer");
+
+    // A warning should be emitted for the incomplete block card.
+    assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
+    assert!(
+        doc.warnings[0].contains("missing answer"),
+        "warning should mention missing answer: {:?}",
+        doc.warnings[0]
+    );
+    assert!(
+        doc.warnings[0].contains("line 4"),
+        "warning should reference line 4: {:?}",
+        doc.warnings[0]
+    );
 }
 
 #[test]

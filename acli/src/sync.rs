@@ -254,6 +254,11 @@ impl AnkiCli {
             let content = fs::read_to_string(path)?;
             match self.parser.parse(&content) {
                 Ok(parsed) => {
+                    // Surface non-fatal warnings (e.g. incomplete block cards).
+                    for warning in &parsed.warnings {
+                        eprintln!("warning: {}: {}", path.display(), warning);
+                    }
+
                     cards.extend(parsed.cards);
                     source_files.push(path.display().to_string());
 

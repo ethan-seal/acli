@@ -620,7 +620,8 @@ fn test_sync_attribute_cards_with_heading() {
         .expect("deck not found");
     assert_eq!(deck.len(), 3, "expected 3 attribute cards");
 
-    // Each card front should contain the heading "Hydrogen" and the unicode arrow →?
+    // Each card front should contain the heading "Hydrogen" and the arrow "-> ?"
+    // (HTML-encoded as "-&gt; ?" by pulldown-cmark).
     for card in deck.iter() {
         assert!(
             card.fields[0].contains("Hydrogen"),
@@ -628,8 +629,8 @@ fn test_sync_attribute_cards_with_heading() {
             card.fields[0]
         );
         assert!(
-            card.fields[0].contains("\u{2192}?"),
-            "card front should contain →?: {:?}",
+            card.fields[0].contains("-&gt; ?"),
+            "card front should contain -> ?: {:?}",
             card.fields[0]
         );
     }
@@ -658,16 +659,10 @@ fn test_sync_attribute_cards_no_heading_is_plain_basic() {
     let deck = adapter.inner().decks.get("Plain").expect("deck not found");
     assert_eq!(deck.len(), 1);
 
-    // Front must NOT contain →? (unicode arrow) — plain basic uses "-> ?"
+    // Front should contain "-> ?" (HTML-encoded as "-&gt; ?" by pulldown-cmark).
     assert!(
-        !deck[0].fields[0].contains("\u{2192}?"),
-        "plain card should not use unicode arrow: {:?}",
-        deck[0].fields[0]
-    );
-    // The adapter HTML-encodes ">" as "&gt;", so the stored form is "-> ?" → "-&gt; ?"
-    assert!(
-        deck[0].fields[0].contains('-'),
-        "plain card front should use ascii arrow (html-encoded): {:?}",
+        deck[0].fields[0].contains("-&gt; ?"),
+        "plain card front should contain -> ? (html-encoded): {:?}",
         deck[0].fields[0]
     );
 }
