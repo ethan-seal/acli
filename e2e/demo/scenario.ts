@@ -14,6 +14,8 @@ export interface Phase {
   markdownContent: string;
   changeSummary: string;
   expectedCardCount: number;
+  /** Optional files to create in the content directory before syncing. */
+  mediaFiles?: Array<{ name: string; content: string }>;
 }
 
 export interface Scenario {
@@ -117,6 +119,51 @@ subject | conjugation <->
 yo | soy
 tú | eres
 él/ella | es
+`,
+    },
+    {
+      name: "images",
+      description: "Adding cards with local images",
+      changeSummary:
+        "Added 2 country-flag cards with SVG images; exercises the media copy pipeline",
+      expectedCardCount: 14,
+      mediaFiles: [
+        {
+          name: "spain.svg",
+          content: `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+  <rect width="120" height="80" fill="#c60b1e"/>
+  <rect y="20" width="120" height="40" fill="#ffc400"/>
+</svg>`,
+        },
+        {
+          name: "france.svg",
+          content: `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">
+  <rect width="40" height="80" fill="#002395"/>
+  <rect x="40" width="40" height="80" fill="#fff"/>
+  <rect x="80" width="40" height="80" fill="#ed2939"/>
+</svg>`,
+        },
+      ],
+      markdownContent: `- Spanish Vocabulary
+    - Greetings
+        - Hello <-> Hola
+        - Goodbye <-> Adios / Hasta luego
+    - Numbers
+        - One -> Uno
+        - Two -> Dos
+
+# Photosynthesis
+- inputs -> CO2 + H2O + sunlight
+- outputs -> glucose + oxygen
+
+subject | conjugation <->
+yo | soy
+tú | eres
+él/ella | es
+
+# Country Flags
+- ![Spain](spain.svg) -> España
+- ![France](france.svg) -> Francia
 `,
     },
   ],

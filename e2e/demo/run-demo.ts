@@ -24,6 +24,7 @@ interface Config {
   collectionPath: string;
   contentDir: string;
   screenshotsDir: string;
+  mediaDir: string;
 }
 
 function ensureDir(path: string): void {
@@ -42,22 +43,23 @@ async function runAcliSync(
   config: Config,
   deckName: string
 ): Promise<{ command: string; output: string; exitCode: number }> {
+  // acli syncs the current working directory — run from the content dir.
   const cmd = [
     config.acliBinary,
     "sync",
-    "--source",
-    config.contentDir,
     "--deck",
     deckName,
     "--collection",
     config.collectionPath,
+    "--media-dir",
+    config.mediaDir,
   ];
 
-  const cmdStr = cmd.join(" ");
+  const cmdStr = `(cd ${config.contentDir} && ${cmd.join(" ")})`;
   console.log(`  Running: ${cmdStr}`);
 
   try {
-    const result = await $`${cmd}`.quiet().nothrow();
+    const result = await $`${cmd}`.cwd(config.contentDir).quiet().nothrow();
     const output = result.stdout.toString() + result.stderr.toString();
     return { command: cmdStr, output: output.trim(), exitCode: result.exitCode };
   } catch (e) {
@@ -233,6 +235,16 @@ async function runPhase(
   console.log(`Phase ${phaseIndex + 1}: ${phase.name}`);
   console.log(`Description: ${phase.description}`);
   console.log(`${"=".repeat(60)}`);
+
+  // Create media files if the phase defines them
+  if (phase.mediaFiles) {
+    console.log(`\nCreating ${phase.mediaFiles.length} media file(s)...`);
+    for (const mf of phase.mediaFiles) {
+      const filePath = `${config.contentDir}/${mf.name}`;
+      await Bun.write(filePath, mf.content);
+      console.log(`  Created: ${mf.name}`);
+    }
+  }
 
   // Write markdown content
   console.log("\nWriting markdown content...");
@@ -497,12 +509,14 @@ Options:
     collectionPath,
     contentDir: `${outputDir}/content`,
     screenshotsDir: `${outputDir}/screenshots`,
+    mediaDir: `${outputDir}/anki_media`,
   };
 
   // Create directories
   ensureDir(config.outputDir);
   ensureDir(config.contentDir);
   ensureDir(config.screenshotsDir);
+  ensureDir(config.mediaDir);
   ensureDir(collectionPath.substring(0, collectionPath.lastIndexOf("/")));
 
   console.log("\n" + "=".repeat(60));

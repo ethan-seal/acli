@@ -107,6 +107,7 @@ fi
 mkdir -p "$OUTPUT_DIR/screenshots"
 mkdir -p "$OUTPUT_DIR/content"
 mkdir -p "$OUTPUT_DIR/anki_collection"
+mkdir -p "$OUTPUT_DIR/anki_media"
 chmod -R 777 "$OUTPUT_DIR"
 
 # Patch the binary for container compatibility (NixOS builds have incompatible interpreter)
