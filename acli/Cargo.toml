@@ -17,6 +17,8 @@ update-planner-parser = { path = "../update-planner-parser" }
 anki-wrapper = { path = "../anki-wrapper", default-features = false }
 serde_json = "1.0"
 pulldown-cmark = "0.9"
+toml = "1.0.4"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.10"

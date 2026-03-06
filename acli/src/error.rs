@@ -28,6 +28,9 @@ pub enum CliError {
     #[error("Media filename collision: {0}")]
     MediaCollisionError(String),
 
+    #[error("Config error: {0}")]
+    ConfigError(String),
+
     #[error("feature not yet implemented")]
     NotImplemented,
 }

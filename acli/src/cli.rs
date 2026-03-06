@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::config::{self, ConfigFile};
 use crate::error::CliError;
 use crate::output::CliOutput;
 use crate::sync::{AnkiCli, SyncConfig, ValidationConfig};
@@ -16,73 +17,86 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Sync markdown files to Anki deck
+    /// Sync markdown files to Anki deck.
+    /// Reads defaults from .acli.toml if present.
     Sync {
-        /// Directory containing markdown files
+        /// Source directories containing markdown files (repeatable).
+        /// Overrides config file `source` when provided.
         #[arg(short, long)]
-        source: PathBuf,
+        source: Vec<PathBuf>,
 
-        /// Target Anki deck name
+        /// Target Anki deck name.
         #[arg(short, long)]
-        deck: String,
+        deck: Option<String>,
 
-        /// Anki collection path (optional, uses default if not specified)
+        /// Anki collection path (uses default if not specified).
         #[arg(short, long)]
         collection: Option<PathBuf>,
 
-        /// Recursive directory traversal
-        #[arg(short, long, action = ArgAction::Set, default_value_t = true)]
-        recursive: bool,
+        /// Path to Anki's collection.media directory for image syncing.
+        #[arg(short, long)]
+        media_dir: Option<PathBuf>,
+
+        /// Recurse into subdirectories.
+        #[arg(short, long)]
+        recursive: Option<bool>,
+
+        /// Show what would be synced without making changes.
+        #[arg(long)]
+        dry_run: bool,
     },
 
-    /// Validate markdown files without syncing
+    /// Validate markdown files without syncing.
     Validate {
-        /// Directory containing markdown files
+        /// Source directories containing markdown files (repeatable).
         #[arg(short, long)]
-        source: PathBuf,
+        source: Vec<PathBuf>,
 
-        /// Recursive directory traversal
-        #[arg(short, long, action = ArgAction::Set, default_value_t = true)]
-        recursive: bool,
+        /// Recurse into subdirectories.
+        #[arg(short, long)]
+        recursive: Option<bool>,
     },
 
-    /// List all cards that would be synced
+    /// Preview cards that would be synced (alias for sync --dry-run).
     Preview {
-        /// Directory containing markdown files
+        /// Source directories containing markdown files (repeatable).
         #[arg(short, long)]
-        source: PathBuf,
+        source: Vec<PathBuf>,
 
-        /// Target Anki deck name
+        /// Target Anki deck name.
         #[arg(short, long)]
-        deck: String,
+        deck: Option<String>,
 
-        /// Recursive directory traversal
-        #[arg(short, long, action = ArgAction::Set, default_value_t = true)]
-        recursive: bool,
+        /// Recurse into subdirectories.
+        #[arg(short, long)]
+        recursive: Option<bool>,
     },
 
-    /// Record a review for a card by its Anki database ID
+    /// Generate a starter .acli.toml in the current directory.
+    Init,
+
+    /// Record a review for a card by its Anki database ID.
     ReviewCard {
-        /// Anki database card ID
+        /// Anki database card ID.
         #[arg(long)]
         card_id: i64,
 
-        /// Review rating
+        /// Review rating.
         #[arg(long)]
         rating: RatingArg,
 
-        /// Anki collection path
+        /// Anki collection path.
         #[arg(short, long)]
         collection: PathBuf,
     },
 
-    /// Get review history for a card by its Anki database ID (outputs JSON)
+    /// Get review history for a card by its Anki database ID (outputs JSON).
     GetReviews {
-        /// Anki database card ID
+        /// Anki database card ID.
         #[arg(long)]
         card_id: i64,
 
-        /// Anki collection path
+        /// Anki collection path.
         #[arg(short, long)]
         collection: PathBuf,
     },
@@ -108,6 +122,45 @@ impl From<RatingArg> for anki_wrapper::ReviewRating {
     }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Load the config file (if any) and print which one we found.
+fn load_config_with_banner() -> Result<(ConfigFile, Option<PathBuf>), CliError> {
+    match config::load_config()? {
+        Some((cfg, path)) => {
+            eprintln!("Using config: {}", path.display());
+            let config_dir = path.parent().unwrap_or(std::path::Path::new("."));
+            // Resolve relative source paths against the config file's directory.
+            let resolved = ConfigFile {
+                source: config::resolve_source_paths(config_dir, &cfg.source),
+                ..cfg
+            };
+            Ok((resolved, Some(path)))
+        }
+        None => Ok((ConfigFile::default(), None)),
+    }
+}
+
+/// Require a value, producing a clear error if missing from both CLI and config.
+fn require<T>(value: Option<T>, field_name: &str) -> Result<T, CliError> {
+    value.ok_or_else(|| {
+        CliError::ConfigError(format!(
+            "`{field_name}` is required. Set it in .acli.toml or pass --{field_name}.",
+        ))
+    })
+}
+
+/// Merge CLI source dirs with config.  CLI wins if non-empty.
+fn merge_sources(cli: Vec<PathBuf>, config: Vec<PathBuf>) -> Vec<PathBuf> {
+    if cli.is_empty() {
+        config
+    } else {
+        cli
+    }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 pub fn run() -> Result<(), CliError> {
     let args = Cli::parse();
     let cli = AnkiCli::new();
@@ -118,15 +171,27 @@ pub fn run() -> Result<(), CliError> {
             source,
             deck,
             collection,
+            media_dir,
             recursive,
+            dry_run,
         } => {
+            let (cfg, _) = load_config_with_banner()?;
+
+            let source_dirs = merge_sources(source, cfg.source);
+            if source_dirs.is_empty() {
+                return Err(CliError::ConfigError(
+                    "`source` is required. Set it in .acli.toml or pass --source.".into(),
+                ));
+            }
+            let deck_name = require(deck.or(cfg.deck), "deck")?;
+
             let config = SyncConfig {
-                source_dirs: vec![source],
-                deck_name: deck,
-                anki_collection_path: collection,
-                anki_media_dir: None,
-                recursive,
-                dry_run: false,
+                source_dirs,
+                deck_name,
+                anki_collection_path: collection.or(cfg.collection),
+                anki_media_dir: media_dir.or(cfg.media_dir),
+                recursive: recursive.or(cfg.recursive).unwrap_or(true),
+                dry_run,
             };
 
             let result = cli.sync(&config)?;
@@ -138,12 +203,22 @@ pub fn run() -> Result<(), CliError> {
             deck,
             recursive,
         } => {
+            let (cfg, _) = load_config_with_banner()?;
+
+            let source_dirs = merge_sources(source, cfg.source);
+            if source_dirs.is_empty() {
+                return Err(CliError::ConfigError(
+                    "`source` is required. Set it in .acli.toml or pass --source.".into(),
+                ));
+            }
+            let deck_name = require(deck.or(cfg.deck), "deck")?;
+
             let config = SyncConfig {
-                source_dirs: vec![source],
-                deck_name: deck,
+                source_dirs,
+                deck_name,
                 anki_collection_path: None,
                 anki_media_dir: None,
-                recursive,
+                recursive: recursive.or(cfg.recursive).unwrap_or(true),
                 dry_run: true,
             };
 
@@ -152,15 +227,25 @@ pub fn run() -> Result<(), CliError> {
             Ok(())
         }
         Commands::Validate { source, recursive } => {
+            let (cfg, _) = load_config_with_banner()?;
+
+            let source_dirs = merge_sources(source, cfg.source);
+            if source_dirs.is_empty() {
+                return Err(CliError::ConfigError(
+                    "`source` is required. Set it in .acli.toml or pass --source.".into(),
+                ));
+            }
+
             let config = ValidationConfig {
-                source_dirs: vec![source],
-                recursive,
+                source_dirs,
+                recursive: recursive.or(cfg.recursive).unwrap_or(true),
             };
 
             let result = cli.validate(&config)?;
             output.print_validation_success(&result);
             Ok(())
         }
+        Commands::Init => run_init(),
         Commands::ReviewCard {
             card_id,
             rating,
@@ -171,6 +256,21 @@ pub fn run() -> Result<(), CliError> {
             collection,
         } => run_get_reviews(card_id, &collection),
     }
+}
+
+// ── Subcommand implementations ────────────────────────────────────────────────
+
+fn run_init() -> Result<(), CliError> {
+    let target = PathBuf::from(config::CONFIG_FILENAME);
+    if target.exists() {
+        return Err(CliError::ConfigError(format!(
+            "{} already exists in the current directory",
+            config::CONFIG_FILENAME
+        )));
+    }
+    std::fs::write(&target, config::starter_config())?;
+    println!("Created {}", target.display());
+    Ok(())
 }
 
 fn run_review_card(
