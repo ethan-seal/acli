@@ -497,6 +497,336 @@ fn test_pipe_table_mixed_with_basic_cards() {
     assert_eq!(basic_count, 1, "expected 1 basic card with 'Paris' answer");
 }
 
+// ── Block card tests ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_block_card_basic() {
+    let input = "What is 2 + 2?\n->\n4";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1, "expected 1 block card");
+    assert_eq!(doc.cards[0].card_type, CardType::Basic);
+    assert_eq!(doc.cards[0].fields[0], "What is 2 + 2?");
+    assert_eq!(doc.cards[0].fields[1], "4");
+}
+
+#[test]
+fn test_block_card_multiline_question() {
+    let input = "- 30 ml Cognac\n- 30 ml Crème de Cacao\n- 30 ml Fresh Cream\n->\nAlexander";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1, "expected 1 block card");
+    assert_eq!(doc.cards[0].card_type, CardType::Basic);
+    assert_eq!(
+        doc.cards[0].fields[0],
+        "- 30 ml Cognac\n- 30 ml Crème de Cacao\n- 30 ml Fresh Cream"
+    );
+    assert_eq!(doc.cards[0].fields[1], "Alexander");
+}
+
+#[test]
+fn test_block_card_multiline_answer() {
+    let input = "What are the states of matter?\n->\n- Solid\n- Liquid\n- Gas";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1, "expected 1 block card");
+    assert_eq!(doc.cards[0].fields[0], "What are the states of matter?");
+    assert_eq!(doc.cards[0].fields[1], "- Solid\n- Liquid\n- Gas");
+}
+
+#[test]
+fn test_block_card_multiline_both_sides() {
+    let input = "- 30 ml Cognac\n- 30 ml Fresh Cream\n->\nAlexander\n![](alexander.jpg)";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1, "expected 1 block card");
+    assert_eq!(
+        doc.cards[0].fields[0],
+        "- 30 ml Cognac\n- 30 ml Fresh Cream"
+    );
+    assert_eq!(doc.cards[0].fields[1], "Alexander\n![](alexander.jpg)");
+}
+
+#[test]
+fn test_block_card_bidirectional() {
+    let input = "hello\nbonjour\n<->\nhi\nsalut";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1, "expected 1 bidirectional block card");
+    assert_eq!(doc.cards[0].card_type, CardType::Bidirectional);
+    assert_eq!(doc.cards[0].fields[0], "hello\nbonjour");
+    assert_eq!(doc.cards[0].fields[1], "hi\nsalut");
+}
+
+#[test]
+fn test_block_card_multiple_separated_by_blank_lines() {
+    let input = "\
+- 30 ml Cognac\n\
+- 30 ml Fresh Cream\n\
+->\n\
+Alexander\n\
+\n\
+- 30 ml Campari\n\
+- 30 ml Sweet Vermouth\n\
+->\n\
+Americano";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2, "expected 2 block cards");
+    assert_eq!(doc.cards[0].fields[1], "Alexander");
+    assert_eq!(doc.cards[1].fields[1], "Americano");
+}
+
+#[test]
+fn test_block_card_arrow_with_no_question_ignored() {
+    // Arrow at start of file with no question content — should not produce a card.
+    // The "answer" text should pass through as regular markdown.
+    let input = "->\nanswer only\n\n- real question -> real answer";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Only the inline card should be produced.
+    assert_eq!(
+        doc.cards.len(),
+        1,
+        "block arrow with no question should be skipped"
+    );
+    assert_eq!(doc.cards[0].fields[1], "real answer");
+}
+
+#[test]
+fn test_block_card_arrow_with_no_answer_ignored() {
+    // Arrow at end of file with no answer content — should not produce a card.
+    let input = "- real question -> real answer\n\nquestion only\n->";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(
+        doc.cards.len(),
+        1,
+        "block arrow with no answer should be skipped"
+    );
+    assert_eq!(doc.cards[0].fields[1], "real answer");
+}
+
+#[test]
+fn test_block_card_mixed_with_inline_cards() {
+    let input = "\
+- hello <-> hola\n\
+\n\
+- 30 ml Cognac\n\
+- 30 ml Fresh Cream\n\
+->\n\
+Alexander\n\
+\n\
+- question -> answer";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 3, "expected 1 block + 2 inline cards");
+
+    // Block card should be present.
+    let block_card = doc.cards.iter().find(|c| c.fields[1] == "Alexander");
+    assert!(block_card.is_some(), "block card 'Alexander' should exist");
+
+    // Inline cards should be present.
+    let bidi = doc
+        .cards
+        .iter()
+        .find(|c| c.card_type == CardType::Bidirectional);
+    assert!(bidi.is_some(), "bidirectional inline card should exist");
+
+    let basic = doc.cards.iter().find(|c| c.fields[1] == "answer");
+    assert!(basic.is_some(), "basic inline card should exist");
+}
+
+#[test]
+fn test_block_card_inline_arrow_not_treated_as_block() {
+    // `- question -> answer` is an inline card, NOT a block card.
+    let input = "- question -> answer";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    assert_eq!(doc.cards[0].card_type, CardType::Basic);
+    assert_eq!(doc.cards[0].fields[0], "question -> ?");
+    assert_eq!(doc.cards[0].fields[1], "answer");
+}
+
+#[test]
+fn test_block_card_no_heading_context() {
+    // Block cards are standalone — headings should NOT provide context.
+    let input = "# Chemistry\n\nWhat is H2O?\n->\nWater";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    assert_eq!(doc.cards[0].fields[0], "What is H2O?");
+    assert_eq!(doc.cards[0].fields[1], "Water");
+}
+
+// ── Template tests ─────────────────────────────────────────────────────────────
+
+#[test]
+fn test_template_inline_cards() {
+    let input = "\
+```template\n\
+- {{ english }} <-> {{ spanish }}\n\
+```\n\
+\n\
+english | spanish\n\
+hello | hola\n\
+goodbye | adiós";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2, "expected 2 inline bidirectional cards");
+    assert_eq!(doc.cards[0].card_type, CardType::Bidirectional);
+    assert_eq!(doc.cards[1].card_type, CardType::Bidirectional);
+
+    let fronts: Vec<&str> = doc.cards.iter().map(|c| c.fields[0].as_str()).collect();
+    assert!(
+        fronts.iter().any(|f| f.contains("hello")),
+        "expected a card with 'hello'"
+    );
+    assert!(
+        fronts.iter().any(|f| f.contains("goodbye")),
+        "expected a card with 'goodbye'"
+    );
+}
+
+#[test]
+fn test_template_block_cards() {
+    let input = "\
+```template\n\
+{{ ingredients }}\n\
+->\n\
+{{ name }}\n\
+```\n\
+\n\
+name | ingredients\n\
+Alexander | 30 ml Cognac, 30 ml Crème de Cacao\n\
+Americano | 30 ml Campari, 30 ml Sweet Vermouth";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 2, "expected 2 block cards from template");
+    assert_eq!(doc.cards[0].card_type, CardType::Basic);
+
+    let answers: Vec<&str> = doc.cards.iter().map(|c| c.fields[1].as_str()).collect();
+    assert!(answers.contains(&"Alexander"), "expected Alexander card");
+    assert!(answers.contains(&"Americano"), "expected Americano card");
+}
+
+#[test]
+fn test_template_mixed_with_regular_cards() {
+    let input = "\
+- standalone -> card\n\
+\n\
+```template\n\
+- {{ a }} -> {{ b }}\n\
+```\n\
+\n\
+a | b\n\
+x | y";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(
+        doc.cards.len(),
+        2,
+        "expected 1 standalone + 1 template card"
+    );
+}
+
+#[test]
+fn test_template_empty_cell_is_error() {
+    let input = "\
+```template\n\
+{{ name }} -> {{ value }}\n\
+```\n\
+\n\
+name | value\n\
+ok | fine\n\
+bad |";
+    let parser = MarkdownParser::new();
+    let result = parser.parse(input);
+
+    assert!(result.is_err(), "empty cell should produce an error");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("empty cell"),
+        "error should mention empty cell: {msg}"
+    );
+}
+
+#[test]
+fn test_template_unknown_placeholder_is_error() {
+    let input = "\
+```template\n\
+{{ name }} -> {{ nonexistent }}\n\
+```\n\
+\n\
+name | value\n\
+hello | world";
+    let parser = MarkdownParser::new();
+    let result = parser.parse(input);
+
+    assert!(
+        result.is_err(),
+        "unknown placeholder should produce an error"
+    );
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("unknown placeholder"),
+        "error should mention unknown placeholder: {msg}"
+    );
+}
+
+#[test]
+fn test_template_whitespace_in_placeholders() {
+    // `{{ name }}` with spaces around the column name should work.
+    let input = "\
+```template\n\
+- {{ name }} -> {{ value }}\n\
+```\n\
+\n\
+name | value\n\
+hello | world";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(doc.cards.len(), 1);
+    assert_eq!(doc.cards[0].fields[1], "world");
+}
+
+#[test]
+fn test_template_no_pipe_table_passes_through() {
+    // Template with no following pipe table — should be ignored (passed through).
+    // The standalone card after it should still parse.
+    let input = "\
+```template\n\
+{{ x }}\n\
+```\n\
+\n\
+- question -> answer";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    assert_eq!(
+        doc.cards.len(),
+        1,
+        "template with no table should be ignored"
+    );
+    assert_eq!(doc.cards[0].fields[1], "answer");
+}
+
 // ── MediaReference tests ───────────────────────────────────────────────────────
 
 #[test]

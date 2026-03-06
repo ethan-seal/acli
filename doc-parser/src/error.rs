@@ -33,4 +33,8 @@ pub enum ParseError {
         /// Human-readable description of what's wrong.
         message: String,
     },
+
+    /// An error in a template block (empty cell, unknown placeholder, etc.).
+    #[error("Template error: {0}")]
+    TemplateError(String),
 }

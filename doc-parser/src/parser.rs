@@ -4,6 +4,180 @@ use crate::types::{Card, CardType, MediaReference, ParsedDocument};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::HashSet;
 
+// ── Template pre-processor ───────────────────────────────────────────────────
+
+/// Expand template blocks in the markdown.
+///
+/// A template block is a code fence with `template` language followed by a
+/// pipe table.  Each data row is expanded through the template using simple
+/// `{{ column }}` substitution, and the template+table is replaced with the
+/// expanded text.
+///
+/// Returns the markdown with all template blocks expanded.  Non-template
+/// content passes through unchanged.
+fn expand_templates(markdown: &str) -> Result<String, ParseError> {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut result_lines: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        // Look for a template code fence opening.
+        let trimmed = lines[i].trim();
+        if trimmed == "```template" || trimmed == "~~~template" {
+            let fence_char = if trimmed.starts_with('`') { '`' } else { '~' };
+            let fence_open = i;
+            i += 1;
+
+            // Collect template body until closing fence.
+            let mut template_lines: Vec<&str> = Vec::new();
+            let mut fence_close = None;
+            while i < lines.len() {
+                let t = lines[i].trim();
+                if (fence_char == '`' && t.starts_with("```"))
+                    || (fence_char == '~' && t.starts_with("~~~"))
+                {
+                    fence_close = Some(i);
+                    i += 1;
+                    break;
+                }
+                template_lines.push(lines[i]);
+                i += 1;
+            }
+
+            let fence_close = match fence_close {
+                Some(fc) => fc,
+                None => {
+                    // Unclosed fence — pass through as-is.
+                    for line in &lines[fence_open..] {
+                        result_lines.push(line.to_string());
+                    }
+                    break;
+                }
+            };
+
+            let template = template_lines.join("\n");
+
+            // Skip blank lines between the closing fence and the pipe table.
+            while i < lines.len() && lines[i].trim().is_empty() {
+                i += 1;
+            }
+
+            // Collect the pipe table (header + data rows).
+            if i >= lines.len() || !lines[i].contains('|') {
+                // No pipe table after template — pass through as-is.
+                for line in &lines[fence_open..=fence_close] {
+                    result_lines.push(line.to_string());
+                }
+                continue;
+            }
+
+            // Parse header row.
+            let header_cells: Vec<&str> = split_pipe_cells(lines[i])
+                .iter()
+                .map(|s| s.trim())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .collect();
+            let header_names: Vec<String> = header_cells.iter().map(|s| s.to_string()).collect();
+            i += 1;
+
+            // Parse data rows.
+            let mut data_rows: Vec<Vec<String>> = Vec::new();
+            while i < lines.len() && lines[i].contains('|') {
+                let cells: Vec<String> = split_pipe_cells(lines[i])
+                    .iter()
+                    .map(|s| s.trim().to_string())
+                    .collect();
+                data_rows.push(cells);
+                i += 1;
+            }
+
+            // Expand template for each row.
+            for (row_idx, row) in data_rows.iter().enumerate() {
+                // Check for empty or missing cells — every placeholder must
+                // have a value.
+                for (col_idx, col_name) in header_names.iter().enumerate() {
+                    let cell = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                    if cell.is_empty() {
+                        return Err(ParseError::TemplateError(format!(
+                            "empty cell for column '{}' in row {} of template at line {}",
+                            col_name,
+                            row_idx + 1,
+                            fence_open + 1,
+                        )));
+                    }
+                }
+
+                let expanded = expand_template_row(&template, &header_names, row, fence_open)?;
+
+                // Add blank line between expanded rows for block card separation.
+                if row_idx > 0 {
+                    result_lines.push(String::new());
+                }
+                for line in expanded.lines() {
+                    result_lines.push(line.to_string());
+                }
+            }
+        } else {
+            result_lines.push(lines[i].to_string());
+            i += 1;
+        }
+    }
+
+    Ok(result_lines.join("\n"))
+}
+
+/// Expand a single template row by replacing `{{ column }}` placeholders.
+///
+/// Handles optional whitespace inside the braces: `{{name}}`, `{{ name }}`,
+/// `{{ name}}`, etc.  Reports an error for unknown placeholders.
+fn expand_template_row(
+    template: &str,
+    header_names: &[String],
+    row: &[String],
+    fence_open: usize,
+) -> Result<String, ParseError> {
+    let mut result = String::with_capacity(template.len());
+    let mut rest = template;
+
+    while let Some(start) = rest.find("{{") {
+        // Copy everything before the placeholder.
+        result.push_str(&rest[..start]);
+
+        let after_open = &rest[start + 2..];
+        match after_open.find("}}") {
+            Some(end) => {
+                let name = after_open[..end].trim();
+                // Look up the column name.
+                let col_idx = header_names.iter().position(|h| h == name);
+                match col_idx {
+                    Some(idx) => {
+                        let value = row.get(idx).map(|s| s.as_str()).unwrap_or("");
+                        result.push_str(value);
+                    }
+                    None => {
+                        return Err(ParseError::TemplateError(format!(
+                            "unknown placeholder '{}' in template at line {}",
+                            name,
+                            fence_open + 1,
+                        )));
+                    }
+                }
+                rest = &after_open[end + 2..];
+            }
+            None => {
+                // No closing `}}` — copy literally and stop.
+                result.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    // Copy any remaining text after the last placeholder.
+    result.push_str(rest);
+
+    Ok(result)
+}
+
 // ── Pipe-table pre-processor ─────────────────────────────────────────────────
 
 /// Arrow marker kinds that appear on column headers.
@@ -333,6 +507,100 @@ fn find_label(lines: &[&str], block_start: usize) -> Option<(usize, String)> {
         idx -= 1;
     }
     None
+}
+
+// ── Block-card pre-processor ──────────────────────────────────────────────────
+
+/// Scan `markdown` for block cards (a `->` or `<->` on its own line separating
+/// question content above from answer content below) and extract them as `Card`
+/// values, returning them alongside the residual text with consumed lines
+/// removed.
+///
+/// A block card is:
+/// - Contiguous non-blank lines above the arrow (the question)
+/// - A line containing only `->` or `<->` (the separator)
+/// - Contiguous non-blank lines below the arrow (the answer)
+///
+/// Blank lines delimit the question and answer blocks.  Both sides must have
+/// at least one line of content.
+fn extract_block_cards(markdown: &str) -> (Vec<Card>, String) {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut cards: Vec<Card> = Vec::new();
+    let mut consumed: Vec<bool> = vec![false; lines.len()];
+
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        let is_block_arrow = trimmed == "->" || trimmed == "<->";
+        if !is_block_arrow {
+            i += 1;
+            continue;
+        }
+
+        let is_bidi = trimmed == "<->";
+        let arrow_idx = i;
+
+        // Walk backward from the arrow to find question content.
+        // Stop at a blank line (or already-consumed line, or start of file).
+        let mut q_start = arrow_idx;
+        while q_start > 0 {
+            let prev = q_start - 1;
+            if lines[prev].trim().is_empty() || consumed[prev] {
+                break;
+            }
+            q_start = prev;
+        }
+
+        // Walk forward from the arrow to find answer content.
+        // Stop at a blank line (or already-consumed line, or end of file).
+        let mut a_end = arrow_idx + 1;
+        while a_end < lines.len() {
+            if lines[a_end].trim().is_empty() || consumed[a_end] {
+                break;
+            }
+            a_end += 1;
+        }
+
+        // Both sides must have at least one line of content.
+        if q_start < arrow_idx && arrow_idx + 1 < a_end {
+            let question = lines[q_start..arrow_idx].join("\n");
+            let answer = lines[arrow_idx + 1..a_end].join("\n");
+
+            let card_type = if is_bidi {
+                CardType::Bidirectional
+            } else {
+                CardType::Basic
+            };
+
+            cards.push(Card {
+                card_type,
+                fields: vec![question, answer],
+            });
+
+            // Mark all consumed lines (question + arrow + answer).
+            for idx in q_start..a_end {
+                consumed[idx] = true;
+            }
+        } else {
+            // Incomplete block card (missing question or answer).
+            // Consume the arrow line so it doesn't leak through to
+            // pulldown-cmark and create a spurious inline card.
+            consumed[arrow_idx] = true;
+        }
+
+        i = a_end.max(arrow_idx + 1);
+    }
+
+    // Build residual text from un-consumed lines.
+    let residual: String = lines
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| !consumed[*idx])
+        .map(|(_, l)| *l)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    (cards, residual)
 }
 
 /// Build the chain of `Sequence` cards from a label and an ordered list of steps.
@@ -744,14 +1012,24 @@ impl DocumentParser for MarkdownParser {
     type Error = ParseError;
 
     fn parse(&self, markdown: &str) -> Result<ParsedDocument, Self::Error> {
+        // Pre-process: expand template blocks first.  Template code fences
+        // paired with pipe tables are expanded into raw text that downstream
+        // stages then parse for card syntax.
+        let after_templates = expand_templates(markdown)?;
+
         // Pre-process: extract pipe-table blocks before anything else so that
         // cmark never sees them and doesn't produce spurious output.
-        let (pipe_table_cards, after_tables) = extract_pipe_table_cards(markdown);
+        let (pipe_table_cards, after_tables) = extract_pipe_table_cards(&after_templates);
 
         // Pre-process: extract ordered-sequence blocks before passing to the
         // Markdown parser.  The sequence lines (and their labels) are removed
         // from the residual text so that pulldown_cmark never sees them.
-        let (sequence_cards, residual) = extract_sequence_cards(&after_tables);
+        let (sequence_cards, after_sequences) = extract_sequence_cards(&after_tables);
+
+        // Pre-process: extract block cards (`->` or `<->` on its own line)
+        // before the Markdown parser.  The question, arrow, and answer lines
+        // are removed from the residual text.
+        let (block_cards, residual) = extract_block_cards(&after_sequences);
 
         let mut state = ParseState::new();
         let mut doc = ParsedDocument::default();
@@ -842,11 +1120,13 @@ impl DocumentParser for MarkdownParser {
 
         doc.media = media_refs;
 
-        // Prepend pipe-table cards, then sequence cards, then cmark cards.
-        // Order: pipe tables → sequences → inline cards (matches source order).
+        // Prepend pipe-table cards, then sequence cards, then block cards,
+        // then cmark cards.
+        // Order: pipe tables → sequences → block cards → inline cards.
         let mut combined: Vec<Card> = Vec::new();
         combined.extend(pipe_table_cards);
         combined.extend(sequence_cards);
+        combined.extend(block_cards);
         combined.extend(doc.cards);
         doc.cards = combined;
 
