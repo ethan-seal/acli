@@ -7,6 +7,8 @@ edition = "2024"
 default = []
 # Enable real Anki backend. Requires building outside workspace or with cargo --manifest-path
 real-anki = ["anki-wrapper/real-anki"]
+# Enable the `serve` subcommand (local web preview of cards)
+web = ["dep:web-preview"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -19,6 +21,7 @@ serde_json = "1.0"
 pulldown-cmark = "0.9"
 toml = "1.0.4"
 serde = { version = "1.0.228", features = ["derive"] }
+web-preview = { path = "../web-preview", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"

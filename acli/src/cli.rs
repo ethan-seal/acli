@@ -58,6 +58,24 @@ enum Commands {
         no_recursive: bool,
     },
 
+    /// Start a local web server to preview cards in a browser.
+    ///
+    /// Re-parses markdown files on every page load, so edits are reflected
+    /// immediately on browser refresh.  Requires --features web.
+    Serve {
+        /// Target Anki deck name (used for display only).
+        #[arg(short, long)]
+        deck: Option<String>,
+
+        /// Port to listen on.
+        #[arg(short, long, default_value = "8080")]
+        port: u16,
+
+        /// Do not recurse into subdirectories.
+        #[arg(long)]
+        no_recursive: bool,
+    },
+
     /// Generate a config file.
     Init {
         /// Create the user-level config (~/.config/acli/config.toml)
@@ -222,6 +240,11 @@ pub fn run() -> Result<(), CliError> {
             output.print_validation_success(&result);
             Ok(())
         }
+        Commands::Serve {
+            deck,
+            port,
+            no_recursive,
+        } => run_serve(deck, port, no_recursive),
         Commands::Init { user } => run_init(user),
         Commands::ReviewCard {
             card_id,
@@ -236,6 +259,105 @@ pub fn run() -> Result<(), CliError> {
 }
 
 // ── Subcommand implementations ────────────────────────────────────────────────
+
+// ── Serve ─────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "web")]
+fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), CliError> {
+    use doc_parser::{DocumentParser, MarkdownParser};
+
+    let cfg = load_config_with_banner()?;
+    let deck_name = deck.or(cfg.deck).unwrap_or_else(|| "Preview".to_string());
+    let recursive = if no_recursive {
+        false
+    } else {
+        cfg.recursive.unwrap_or(true)
+    };
+    let source_dirs = source_dir()?;
+    let cwd = std::env::current_dir().ok();
+
+    let refresh = move || -> Result<web_preview::PreviewData, String> {
+        let parser = MarkdownParser::new();
+        let files = crate::discovery::discover_markdown_files(&source_dirs, recursive)
+            .map_err(|e| e.to_string())?;
+
+        let mut cards = Vec::new();
+        let mut errors = Vec::new();
+
+        for path in &files {
+            let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            match parser.parse(&content) {
+                Ok(parsed) => {
+                    for w in &parsed.warnings {
+                        errors.push(format!("{}: {w}", path.display()));
+                    }
+                    for card in parsed.cards {
+                        let display_path = if let Some(ref cwd) = cwd {
+                            path.strip_prefix(cwd).unwrap_or(path).display().to_string()
+                        } else {
+                            path.display().to_string()
+                        };
+
+                        // Image URLs in card fields are relative to the
+                        // source file's directory.  Rewrite them so the
+                        // preview server's /media/ route can resolve them.
+                        let source_dir = path.parent().unwrap_or(std::path::Path::new("."));
+                        let source_dir_rel = if let Some(ref cwd) = cwd {
+                            source_dir.strip_prefix(cwd).unwrap_or(source_dir)
+                        } else {
+                            source_dir
+                        };
+                        let front_raw = card.fields.first().map(|s| s.as_str()).unwrap_or("");
+                        let back_raw = card.fields.get(1).map(|s| s.as_str()).unwrap_or("");
+
+                        cards.push(web_preview::PreviewCard {
+                            front: web_preview::rewrite_image_urls(front_raw, source_dir_rel),
+                            back: web_preview::rewrite_image_urls(back_raw, source_dir_rel),
+                            card_type: match card.card_type {
+                                doc_parser::CardType::Basic => web_preview::CardType::Basic,
+                                doc_parser::CardType::Bidirectional => {
+                                    web_preview::CardType::Bidirectional
+                                }
+                                doc_parser::CardType::Sequence => web_preview::CardType::Sequence,
+                            },
+                            source_file: Some(display_path),
+                        });
+                    }
+                }
+                Err(doc_parser::ParseError::EmptyDocument) => {}
+                Err(e) => {
+                    errors.push(format!("{}: {e}", path.display()));
+                }
+            }
+        }
+
+        Ok(web_preview::PreviewData {
+            deck_name: deck_name.clone(),
+            cards,
+            files_processed: files.len(),
+            errors,
+        })
+    };
+
+    let static_root = std::env::current_dir().ok();
+    web_preview::serve(port, static_root, refresh).map_err(|e| {
+        CliError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
+    })
+}
+
+#[cfg(not(feature = "web"))]
+fn run_serve(_deck: Option<String>, _port: u16, _no_recursive: bool) -> Result<(), CliError> {
+    Err(CliError::ConfigError(
+        "serve requires building with --features web.\n\
+         Install with: cargo install acli --features web"
+            .to_string(),
+    ))
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
 
 fn run_init(user: bool) -> Result<(), CliError> {
     if user {
