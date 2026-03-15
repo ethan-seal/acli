@@ -117,6 +117,34 @@ impl MediaReference {
     }
 }
 
+/// A non-fatal warning emitted during parsing.
+///
+/// Warnings indicate problems that don't prevent card extraction but that the
+/// author should fix (e.g. an incomplete block card, a template with no table).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    /// 1-based line number where the warning originated.
+    pub line: usize,
+    /// Human-readable description of the problem.
+    pub message: String,
+}
+
+impl Warning {
+    /// Create a new warning at the given line.
+    pub fn new(line: usize, message: impl Into<String>) -> Self {
+        Self {
+            line,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line, self.message)
+    }
+}
+
 /// The result of parsing a document, including all extracted cards.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ParsedDocument {
@@ -127,5 +155,5 @@ pub struct ParsedDocument {
     /// Optional source path for diagnostics.
     pub source_path: Option<String>,
     /// Non-fatal warnings encountered during parsing (e.g. incomplete block cards).
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Warning>,
 }

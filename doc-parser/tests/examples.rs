@@ -597,12 +597,12 @@ fn test_block_card_arrow_with_no_question_warns() {
     // A warning should be emitted for the incomplete block card.
     assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
     assert!(
-        doc.warnings[0].contains("missing question"),
+        doc.warnings[0].message.contains("missing question"),
         "warning should mention missing question: {:?}",
         doc.warnings[0]
     );
-    assert!(
-        doc.warnings[0].contains("line 1"),
+    assert_eq!(
+        doc.warnings[0].line, 1,
         "warning should reference line 1: {:?}",
         doc.warnings[0]
     );
@@ -626,12 +626,12 @@ fn test_block_card_arrow_with_no_answer_warns() {
     // A warning should be emitted for the incomplete block card.
     assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
     assert!(
-        doc.warnings[0].contains("missing answer"),
+        doc.warnings[0].message.contains("missing answer"),
         "warning should mention missing answer: {:?}",
         doc.warnings[0]
     );
-    assert!(
-        doc.warnings[0].contains("line 4"),
+    assert_eq!(
+        doc.warnings[0].line, 4,
         "warning should reference line 4: {:?}",
         doc.warnings[0]
     );
@@ -701,7 +701,6 @@ fn test_template_inline_cards() {
 ```template\n\
 - {{ english }} <-> {{ spanish }}\n\
 ```\n\
-\n\
 english | spanish\n\
 hello | hola\n\
 goodbye | adiós";
@@ -731,7 +730,6 @@ fn test_template_block_cards() {
 ->\n\
 {{ name }}\n\
 ```\n\
-\n\
 name | ingredients\n\
 Alexander | 30 ml Cognac, 30 ml Crème de Cacao\n\
 Americano | 30 ml Campari, 30 ml Sweet Vermouth";
@@ -754,7 +752,6 @@ fn test_template_mixed_with_regular_cards() {
 ```template\n\
 - {{ a }} -> {{ b }}\n\
 ```\n\
-\n\
 a | b\n\
 x | y";
     let parser = MarkdownParser::new();
@@ -773,7 +770,6 @@ fn test_template_empty_cell_is_error() {
 ```template\n\
 {{ name }} -> {{ value }}\n\
 ```\n\
-\n\
 name | value\n\
 ok | fine\n\
 bad |";
@@ -794,7 +790,6 @@ fn test_template_unknown_placeholder_is_error() {
 ```template\n\
 {{ name }} -> {{ nonexistent }}\n\
 ```\n\
-\n\
 name | value\n\
 hello | world";
     let parser = MarkdownParser::new();
@@ -818,7 +813,6 @@ fn test_template_whitespace_in_placeholders() {
 ```template\n\
 - {{ name }} -> {{ value }}\n\
 ```\n\
-\n\
 name | value\n\
 hello | world";
     let parser = MarkdownParser::new();
@@ -829,8 +823,8 @@ hello | world";
 }
 
 #[test]
-fn test_template_no_pipe_table_passes_through() {
-    // Template with no following pipe table — should be ignored (passed through).
+fn test_template_no_pipe_table_warns() {
+    // Template with no following pipe table — should warn and pass through.
     // The standalone card after it should still parse.
     let input = "\
 ```template\n\
@@ -847,6 +841,45 @@ fn test_template_no_pipe_table_passes_through() {
         "template with no table should be ignored"
     );
     assert_eq!(doc.cards[0].fields[1], "answer");
+    assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
+    assert_eq!(doc.warnings[0].line, 1);
+    assert!(
+        doc.warnings[0].message.contains("no pipe table"),
+        "warning should mention missing table: {:?}",
+        doc.warnings[0]
+    );
+}
+
+#[test]
+fn test_template_blank_line_before_table_warns() {
+    // A blank line between the template fence and the pipe table should warn
+    // and NOT expand — the table must be immediately adjacent.
+    // Include a standalone card so the document isn't empty.
+    let input = "\
+- real -> card\n\
+\n\
+```template\n\
+- {{ a }} -> {{ b }}\n\
+```\n\
+\n\
+a | b\n\
+x | y";
+    let parser = MarkdownParser::new();
+    let doc = parser.parse(input).unwrap();
+
+    // Only the standalone card should exist — the template should not expand.
+    assert_eq!(
+        doc.cards.len(),
+        1,
+        "blank line between template and table should prevent expansion"
+    );
+    assert_eq!(doc.cards[0].fields[1], "card");
+    assert_eq!(doc.warnings.len(), 1, "expected 1 warning");
+    assert!(
+        doc.warnings[0].message.contains("no pipe table"),
+        "warning should mention missing table: {:?}",
+        doc.warnings[0]
+    );
 }
 
 // ── MediaReference tests ───────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 //! Parser traits and Markdown parser implementation.
 use crate::error::ParseError;
-use crate::types::{Card, CardType, MediaReference, ParsedDocument};
+use crate::types::{Card, CardType, MediaReference, ParsedDocument, Warning};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::HashSet;
 
@@ -15,9 +15,10 @@ use std::collections::HashSet;
 ///
 /// Returns the markdown with all template blocks expanded.  Non-template
 /// content passes through unchanged.
-fn expand_templates(markdown: &str) -> Result<String, ParseError> {
+fn expand_templates(markdown: &str) -> Result<(String, Vec<Warning>), ParseError> {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut result_lines: Vec<String> = Vec::new();
+    let mut warnings: Vec<Warning> = Vec::new();
     let mut i = 0;
 
     while i < lines.len() {
@@ -57,14 +58,16 @@ fn expand_templates(markdown: &str) -> Result<String, ParseError> {
 
             let template = template_lines.join("\n");
 
-            // Skip blank lines between the closing fence and the pipe table.
-            while i < lines.len() && lines[i].trim().is_empty() {
-                i += 1;
-            }
-
             // Collect the pipe table (header + data rows).
+            // The table must start on the very next line — no blank lines
+            // between the closing fence and the header row.
             if i >= lines.len() || !lines[i].contains('|') {
-                // No pipe table after template — pass through as-is.
+                // No pipe table immediately after template — warn and pass
+                // through as-is.
+                warnings.push(Warning::new(
+                    fence_open + 1,
+                    "template block has no pipe table immediately after it",
+                ));
                 for line in &lines[fence_open..=fence_close] {
                     result_lines.push(line.to_string());
                 }
@@ -124,7 +127,7 @@ fn expand_templates(markdown: &str) -> Result<String, ParseError> {
         }
     }
 
-    Ok(result_lines.join("\n"))
+    Ok((result_lines.join("\n"), warnings))
 }
 
 /// Expand a single template row by replacing `{{ column }}` placeholders.
@@ -523,10 +526,10 @@ fn find_label(lines: &[&str], block_start: usize) -> Option<(usize, String)> {
 ///
 /// Blank lines delimit the question and answer blocks.  Both sides must have
 /// at least one line of content.
-fn extract_block_cards(markdown: &str) -> (Vec<Card>, String, Vec<String>) {
+fn extract_block_cards(markdown: &str) -> (Vec<Card>, String, Vec<Warning>) {
     let lines: Vec<&str> = markdown.lines().collect();
     let mut cards: Vec<Card> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
+    let mut warnings: Vec<Warning> = Vec::new();
     let mut consumed: Vec<bool> = vec![false; lines.len()];
 
     let mut i = 0;
@@ -598,9 +601,9 @@ fn extract_block_cards(markdown: &str) -> (Vec<Card>, String, Vec<String>) {
             } else {
                 "missing answer below arrow"
             };
-            warnings.push(format!(
-                "line {}: block card `{}` {}",
-                line_num, arrow_str, missing
+            warnings.push(Warning::new(
+                line_num,
+                format!("block card `{}` {}", arrow_str, missing),
             ));
             consumed[arrow_idx] = true;
         }
@@ -1032,7 +1035,7 @@ impl DocumentParser for MarkdownParser {
         // Pre-process: expand template blocks first.  Template code fences
         // paired with pipe tables are expanded into raw text that downstream
         // stages then parse for card syntax.
-        let after_templates = expand_templates(markdown)?;
+        let (after_templates, template_warnings) = expand_templates(markdown)?;
 
         // Pre-process: extract pipe-table blocks before anything else so that
         // cmark never sees them and doesn't produce spurious output.
@@ -1141,7 +1144,8 @@ impl DocumentParser for MarkdownParser {
         }
 
         doc.media = media_refs;
-        doc.warnings = block_warnings;
+        doc.warnings = template_warnings;
+        doc.warnings.extend(block_warnings);
 
         // Prepend pipe-table cards, then sequence cards, then block cards,
         // then cmark cards.
