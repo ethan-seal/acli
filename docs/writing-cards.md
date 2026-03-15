@@ -83,6 +83,52 @@ Troubleshoot Wi-Fi connection
 
 The label line is required. Without it the `=>` lines are ignored.
 
+## Block cards
+
+When a question or answer needs multiple lines, put `->` on its own line. Content above is the question, content below is the answer. Both sides support full Markdown.
+
+```
+- 30 ml Cognac
+- 30 ml Crème de Cacao (Brown)
+- 30 ml Fresh Cream
+- Fresh ground nutmeg
+->
+Alexander
+![](cocktail-images/alexander.jpg)
+```
+
+The question side renders as a bullet list, and the answer side as text + image.
+
+Separate multiple block cards with blank lines:
+
+```
+- 30 ml Cognac
+- 30 ml Crème de Cacao (Brown)
+- 30 ml Fresh Cream
+->
+Alexander
+
+- 30 ml Campari
+- 30 ml Sweet Vermouth
+- splash Soda Water
+->
+Americano
+```
+
+Use `<->` on its own line for bidirectional block cards:
+
+```
+hello
+bonjour
+<->
+hi
+salut
+```
+
+**Note:** Block cards are standalone — headings above them do **not** provide context the way they do for inline cards. If you want context, include it in the question content.
+
+An arrow on its own line that is missing a question or answer side is skipped with a warning.
+
 ## Pipe-block tables
 
 A contiguous block of pipe-separated lines forms a table. The first line is the header row, and arrow markers on column headers control which columns generate cards.
@@ -138,6 +184,51 @@ accusative | puellam |
 ```
 
 Here, accusative/plural is empty so no card is generated for that cell.
+
+## Templates
+
+Templates let you generate many cards from a pattern and a data table. A code fence with language `template` defines the card shape using `{{ column }}` placeholders. A pipe table immediately after supplies the data. Each row is expanded through the template, then parsed for card syntax like any other text.
+
+**Inline card template:**
+
+~~~
+```template
+- {{ english }} <-> {{ spanish }}
+```
+english | spanish
+hello | hola
+goodbye | adiós
+good morning | buenos días
+~~~
+
+This expands to three bidirectional cards, identical to writing them by hand.
+
+**Block card template:**
+
+~~~
+```template
+{{ ingredients }}
+->
+{{ name }}
+![](cocktail-images/{{ image }}.jpg)
+```
+name | image | ingredients
+Alexander | alexander | 30 ml Cognac, 30 ml Crème de Cacao, 30 ml Fresh Cream
+Americano | americano | 30 ml Campari, 30 ml Sweet Vermouth, splash Soda Water
+Angel Face | angel_face | 30 ml Gin, 30 ml Apricot Brandy, 30 ml Calvados
+~~~
+
+Each row expands into a block card whose question is the ingredient list and whose answer is the name + image.
+
+**Rules:**
+
+- Placeholders use `{{ column }}` syntax (whitespace around the name is flexible).
+- Substitution only — no conditionals, loops, or filters.
+- Every placeholder must match a column header. Unknown placeholders are an error.
+- Every cell referenced by the template must have a value. Empty cells are an error.
+- The pipe table must start on the line immediately after the closing fence — no blank lines between them. A blank line (or no table) produces a warning.
+- The expanded text is parsed for all card syntax (`->`, `<->`, block cards, etc.), so templates compose freely with every other card format.
+- Prefer hyphens over underscores in column names (e.g. `{{ first-name }}` not `{{ first_name }}`). Any characters work except `|` and `}}`.
 
 ## Images
 
