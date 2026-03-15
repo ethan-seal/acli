@@ -1,0 +1,12 @@
+[package]
+name = "web-preview"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "web_preview"
+path = "src/lib.rs"
+
+[dependencies]
+tiny_http = "0.12"
+pulldown-cmark = { version = "0.9", default-features = false }
