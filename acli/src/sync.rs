@@ -317,8 +317,8 @@ impl AnkiCli {
             match self.parser.parse(&content) {
                 Ok(parsed) => {
                     // Surface non-fatal warnings (e.g. incomplete block cards).
-                    for warning in &parsed.warnings {
-                        eprintln!("warning: {}: {}", path.display(), warning);
+                    for w in &parsed.warnings {
+                        eprintln!("warning: {}: {}", path.display(), w);
                     }
 
                     cards.extend(parsed.cards);

@@ -1276,7 +1276,6 @@ fn test_sync_template_block_cards() {
 ->\n\
 {{ name }}\n\
 ```\n\
-\n\
 name | ingredients\n\
 Alexander | 30 ml Cognac, 30 ml Crème de Cacao, 30 ml Fresh Cream\n\
 Americano | 30 ml Campari, 30 ml Sweet Vermouth, splash Soda Water\n\
@@ -1316,7 +1315,6 @@ fn test_sync_template_inline_cards() {
 ```template\n\
 - {{ english }} <-> {{ spanish }}\n\
 ```\n\
-\n\
 english | spanish\n\
 hello | hola\n\
 goodbye | adiós\n\
