@@ -22,12 +22,12 @@ impl update_planner_parser::executor::AnkiCollection for MockCollection {
         println!("add_card to {}: {:?}", deck_name, card);
         Ok(())
     }
-    fn delete_card(
+    fn delete_note(
         &mut self,
         deck_name: &str,
         card_id: update_planner_parser::types::CardId,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("delete_card from {}: {}", deck_name, card_id);
+        println!("delete_note from {}: {}", deck_name, card_id);
         Ok(())
     }
     fn update_card(

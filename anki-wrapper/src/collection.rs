@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 
 use crate::error::{AnkiWrapperError, Result};
-use crate::types::{Card, CardId, CardInfo, DeckConfig, ReviewEntry, ReviewRating};
+use crate::types::{Card, CardId, CardInfo, DeckConfig, NoteId, ReviewEntry, ReviewRating};
 
 pub trait AnkiCollection {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    // === Card Operations ===
+    // === Card / Note Operations ===
     fn add_card(&mut self, deck: &DeckConfig, card: &Card) -> std::result::Result<(), Self::Error>;
     fn update_card(&mut self, card_id: CardId, card: &Card)
         -> std::result::Result<(), Self::Error>;
-    fn delete_card(&mut self, card_id: CardId) -> std::result::Result<(), Self::Error>;
+    /// Delete a note (and all its cards) by note ID.
+    fn delete_note(&mut self, note_id: NoteId) -> std::result::Result<(), Self::Error>;
     fn get_cards_in_deck(
         &mut self,
         deck: &DeckConfig,
@@ -72,7 +73,17 @@ impl DefaultAnkiCollection {
     pub fn open_collection_path<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
         use anki::collection::CollectionBuilder;
         let collection = CollectionBuilder::new(path.as_ref()).build().map_err(|e| {
-            AnkiWrapperError::AnkiError(format!("Failed to open collection: {}", e))
+            let msg = format!("{}", e);
+            if msg.contains("locked") || msg.contains("busy") {
+                AnkiWrapperError::AnkiError(
+                    "Failed to open collection: the database is locked.\n\
+                     This usually means Anki is currently running. \
+                     Close Anki and try again."
+                        .to_string(),
+                )
+            } else {
+                AnkiWrapperError::AnkiError(format!("Failed to open collection: {}", e))
+            }
         })?;
         Ok(Self { collection })
     }
@@ -118,7 +129,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         ))
     }
 
-    fn delete_card(&mut self, _card_id: CardId) -> Result<()> {
+    fn delete_note(&mut self, _note_id: NoteId) -> Result<()> {
         Err(AnkiWrapperError::AnkiError(
             "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
         ))
@@ -379,18 +390,20 @@ impl AnkiCollection for DefaultAnkiCollection {
         Ok(())
     }
 
-    fn delete_card(&mut self, card_id: CardId) -> Result<()> {
-        // Get the card to find its note ID
-        let anki_card = self
+    fn delete_note(&mut self, note_id: NoteId) -> Result<()> {
+        let anki_note_id = anki::notes::NoteId(note_id.0);
+
+        // Verify the note exists before attempting removal.
+        let _note = self
             .collection
             .storage
-            .get_card(anki::card::CardId(card_id.0))
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e)))?
-            .ok_or_else(|| AnkiWrapperError::CardNotFound { id: card_id })?;
+            .get_note(anki_note_id)
+            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e)))?
+            .ok_or_else(|| AnkiWrapperError::NoteNotFound { id: note_id })?;
 
-        // Remove the note (which removes all its cards)
+        // Remove the note (and all its cards).
         self.collection
-            .remove_notes(&[anki_card.note_id()])
+            .remove_notes(&[anki_note_id])
             .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to remove note: {}", e)))?;
 
         Ok(())
@@ -398,6 +411,7 @@ impl AnkiCollection for DefaultAnkiCollection {
 
     fn get_cards_in_deck(&mut self, deck: &DeckConfig) -> Result<Vec<CardInfo>> {
         use anki::search::SortMode;
+        use std::collections::HashSet;
 
         // Search for all cards in the deck
         let search_query = format!("deck:\"{}\"", deck.name);
@@ -407,6 +421,8 @@ impl AnkiCollection for DefaultAnkiCollection {
             .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to search cards: {}", e)))?;
 
         let mut result = Vec::new();
+        let mut seen_notes = HashSet::new();
+
         for anki_card_id in card_ids {
             if let Some(anki_card) = self
                 .collection
@@ -414,6 +430,13 @@ impl AnkiCollection for DefaultAnkiCollection {
                 .get_card(anki_card_id)
                 .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e)))?
             {
+                // Deduplicate by note: only emit one CardInfo per note.
+                // A "Basic (and reversed card)" note produces two Anki cards
+                // but represents a single user-authored card.
+                if !seen_notes.insert(anki_card.note_id()) {
+                    continue;
+                }
+
                 // Get the note to access fields
                 if let Some(note) = self
                     .collection
@@ -442,6 +465,7 @@ impl AnkiCollection for DefaultAnkiCollection {
 
                     result.push(CardInfo {
                         id: CardId(anki_card_id.0),
+                        note_id: NoteId(anki_card.note_id().0),
                         card_type,
                         fields: note.fields().clone(),
                     });
@@ -566,6 +590,7 @@ pub struct FakeAnkiCollection {
     pub decks: HashMap<String, Vec<CardInfo>>,
     pub reviews: HashMap<CardId, Vec<ReviewEntry>>,
     next_card_id: i64,
+    next_note_id: i64,
 }
 
 impl Default for FakeAnkiCollection {
@@ -574,6 +599,7 @@ impl Default for FakeAnkiCollection {
             decks: HashMap::new(),
             reviews: HashMap::new(),
             next_card_id: 1,
+            next_note_id: 1,
         }
     }
 }
@@ -588,20 +614,48 @@ impl FakeAnkiCollection {
         self.next_card_id += 1;
         id
     }
+
+    fn generate_note_id(&mut self) -> NoteId {
+        let id = NoteId(self.next_note_id);
+        self.next_note_id += 1;
+        id
+    }
 }
 
 impl AnkiCollection for FakeAnkiCollection {
     type Error = AnkiWrapperError;
 
     fn add_card(&mut self, deck: &DeckConfig, card: &Card) -> Result<()> {
+        let note_id = self.generate_note_id();
         let card_id = self.generate_card_id();
-        let card_info = CardInfo {
+
+        // BasicReversed notes produce a second (reverse) card, matching
+        // real Anki's "Basic (and reversed card)" behaviour.
+        let reverse_id = if card.card_type == crate::types::CardType::BasicReversed {
+            Some(self.generate_card_id())
+        } else {
+            None
+        };
+
+        let entry = self.decks.entry(deck.name.clone()).or_default();
+
+        // Create the forward card (always).
+        entry.push(CardInfo {
             id: card_id,
+            note_id,
             card_type: card.card_type.clone(),
             fields: card.fields.clone(),
-        };
-        let entry = self.decks.entry(deck.name.clone()).or_default();
-        entry.push(card_info);
+        });
+
+        if let Some(rev_id) = reverse_id {
+            entry.push(CardInfo {
+                id: rev_id,
+                note_id,
+                card_type: card.card_type.clone(),
+                fields: card.fields.clone(),
+            });
+        }
+
         Ok(())
     }
 
@@ -641,35 +695,61 @@ impl AnkiCollection for FakeAnkiCollection {
     }
 
     fn update_card(&mut self, card_id: CardId, card: &Card) -> Result<()> {
-        // Find the card across all decks
+        // Find the card to get its note_id, then update all cards sharing
+        // that note (mirrors real Anki where updating a note affects all
+        // its cards).
+        let target_note_id = self
+            .decks
+            .values()
+            .flat_map(|cards| cards.iter())
+            .find(|c| c.id == card_id)
+            .map(|c| c.note_id)
+            .ok_or(AnkiWrapperError::CardNotFound { id: card_id })?;
+
         for cards in self.decks.values_mut() {
-            if let Some(card_info) = cards.iter_mut().find(|c| c.id == card_id) {
+            for card_info in cards.iter_mut().filter(|c| c.note_id == target_note_id) {
                 card_info.card_type = card.card_type.clone();
                 card_info.fields = card.fields.clone();
-                return Ok(());
             }
         }
-        Err(AnkiWrapperError::CardNotFound { id: card_id })
+        Ok(())
     }
 
-    fn delete_card(&mut self, card_id: CardId) -> Result<()> {
-        // Find and remove the card across all decks
+    fn delete_note(&mut self, note_id: NoteId) -> Result<()> {
+        // Remove all cards belonging to this note across all decks.
+        let mut found = false;
         for cards in self.decks.values_mut() {
-            if let Some(pos) = cards.iter().position(|c| c.id == card_id) {
-                cards.remove(pos);
-                return Ok(());
+            let before = cards.len();
+            cards.retain(|c| c.note_id != note_id);
+            if cards.len() < before {
+                found = true;
             }
         }
-        Err(AnkiWrapperError::CardNotFound { id: card_id })
+        if found {
+            Ok(())
+        } else {
+            Err(AnkiWrapperError::NoteNotFound { id: note_id })
+        }
     }
 
     fn get_cards_in_deck(&mut self, deck: &DeckConfig) -> Result<Vec<CardInfo>> {
-        self.decks
+        use std::collections::HashSet;
+
+        let cards = self
+            .decks
             .get(&deck.name)
-            .map(|cards| cards.clone())
             .ok_or_else(|| AnkiWrapperError::DeckNotFound {
                 name: deck.name.clone(),
-            })
+            })?;
+
+        // Deduplicate by note_id — return one entry per note, matching
+        // the real Anki implementation.
+        let mut seen = HashSet::new();
+        Ok(cards
+            .iter()
+            .filter(|c| seen.insert(c.note_id))
+            .cloned()
+            .collect())
     }
 
     fn deck_exists(&mut self, deck: &DeckConfig) -> Result<bool> {

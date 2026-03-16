@@ -4,8 +4,8 @@
 //! implementation and implements `update_planner_parser::executor::AnkiCollection`.
 
 use anki_wrapper::{
-    AnkiCollection as AnkiWrapperCollection, Card as AnkiWrapperCard, CardId as AnkiCardId,
-    CardInfo, CardType as AnkiWrapperCardType, DeckConfig, FakeAnkiCollection,
+    AnkiCollection as AnkiWrapperCollection, Card as AnkiWrapperCard, CardInfo,
+    CardType as AnkiWrapperCardType, DeckConfig, FakeAnkiCollection, NoteId,
 };
 use update_planner_parser::executor::AnkiCollection as ExecutorCollection;
 use update_planner_parser::types::{
@@ -69,9 +69,9 @@ impl<C: AnkiWrapperCollection> AnkiCollectionAdapter<C> {
         }
     }
 
-    /// Delete a card by its Anki database ID.
-    pub fn delete_card_by_anki_id(&mut self, card_id: AnkiCardId) -> Result<(), C::Error> {
-        self.inner.delete_card(card_id)
+    /// Delete a note (and all its cards) by Anki note ID.
+    pub fn delete_note_by_id(&mut self, note_id: NoteId) -> Result<(), C::Error> {
+        self.inner.delete_note(note_id)
     }
 
     /// Add a card to a deck. Converts the planner card to HTML for Anki display.
@@ -173,23 +173,20 @@ where
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
-    fn delete_card(
+    fn delete_note(
         &mut self,
         _deck_name: &str,
         card_id: PlannerCardId,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // anki-wrapper's delete_card doesn't need deck name
-        // We need to convert the content-hash based PlannerCardId to anki-wrapper's i64 CardId
-        // For now, we can't do this directly since the IDs are fundamentally different.
-        // The planner's CardId is a content hash (u64), while anki-wrapper's is database ID (i64).
+        // We can't map the content-hash based PlannerCardId to anki-wrapper's
+        // NoteId.  The planner's CardId is a content hash (u64), while
+        // anki-wrapper's NoteId is a database ID (i64).
         //
-        // In a fresh sync scenario (which DefaultExecutor uses), we clear the deck first,
-        // so delete operations don't actually occur. If we need true incremental sync,
-        // we'd need to maintain a mapping between content hashes and database IDs.
-        //
-        // For now, return an error if delete is called (shouldn't happen with fresh sync).
+        // In a fresh sync scenario (which DefaultExecutor uses), we clear the
+        // deck first, so delete operations don't actually occur.  The real
+        // incremental sync path in sync.rs works with NoteIds directly.
         Err(format!(
-            "delete_card not supported: content-hash CardId {} cannot be mapped to database ID",
+            "delete_note not supported: content-hash CardId {} cannot be mapped to database NoteId",
             card_id
         )
         .into())
@@ -310,7 +307,8 @@ mod tests {
         };
         adapter.add_card("Test", &card).unwrap();
 
-        let cards = &adapter.inner().decks["Test"];
+        // get_cards_in_deck deduplicates by note — 1 reversed note = 1 entry.
+        let cards = adapter.get_cards_in_deck("Test").unwrap();
         assert_eq!(cards.len(), 1);
 
         // The front field should be a nested HTML list (via pulldown-cmark)
@@ -353,7 +351,10 @@ mod tests {
 
         executor.execute_plan(&plan, &mut adapter).unwrap();
 
-        let cards = &adapter.inner().decks["MyDeck"];
+        // get_cards_in_deck returns 2 notes (Basic + Bidirectional).
+        // Internally there are 3 cards (1 Basic + 2 for the reversed note),
+        // but the public API deduplicates by note.
+        let cards = adapter.get_cards_in_deck("MyDeck").unwrap();
         assert_eq!(cards.len(), 2);
     }
 }

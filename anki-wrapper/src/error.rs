@@ -1,13 +1,14 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-use crate::types::CardId;
+use crate::types::{CardId, NoteId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnkiWrapperError {
     DeckNotFound { name: String },
     DeckAlreadyExists { name: String },
     CardNotFound { id: CardId },
+    NoteNotFound { id: NoteId },
     InvalidCard { reason: String },
     AnkiError(String),
 }
@@ -20,6 +21,7 @@ impl Display for AnkiWrapperError {
                 write!(f, "Deck already exists: {}", name)
             }
             AnkiWrapperError::CardNotFound { id } => write!(f, "Card not found: {}", id.0),
+            AnkiWrapperError::NoteNotFound { id } => write!(f, "Note not found: {}", id.0),
             AnkiWrapperError::InvalidCard { reason } => {
                 write!(f, "Invalid card format: {}", reason)
             }

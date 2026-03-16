@@ -2,6 +2,14 @@
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct CardId(pub i64);
 
+/// Opaque note identifier (wraps i64 from Anki).
+///
+/// In Anki a single *note* produces one or more *cards* — e.g. a
+/// "Basic (and reversed card)" note generates two cards.  Deletion
+/// and update operations should target notes, not individual cards.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct NoteId(pub i64);
+
 /// Rating given when answering a card during review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewRating {
@@ -34,10 +42,15 @@ pub struct Card {
     pub fields: Vec<String>,
 }
 
-/// Information about a card in the collection
+/// Information about a note/card in the collection.
+///
+/// Each entry represents one Anki *note*.  `id` is the database ID of the
+/// first card belonging to the note (useful for review operations), while
+/// `note_id` is the note's own ID (used for deletion).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardInfo {
     pub id: CardId,
+    pub note_id: NoteId,
     pub card_type: CardType,
     pub fields: Vec<String>,
 }

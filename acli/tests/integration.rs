@@ -170,17 +170,14 @@ fn test_sync_creates_bidirectional_cards() {
 "#;
 
     let temp_dir = setup_temp_dir_with_files(&[("spanish.md", content)]);
-    let adapter = run_sync_pipeline(temp_dir.path(), "Spanish");
+    let mut adapter = run_sync_pipeline(temp_dir.path(), "Spanish");
 
-    let deck = adapter
-        .inner()
-        .decks
-        .get("Spanish")
-        .expect("deck not found");
-    assert_eq!(deck.len(), 2, "expected 2 bidirectional cards");
+    // get_cards_in_deck returns one entry per note (deduplicated).
+    let deck = adapter.get_cards_in_deck("Spanish").unwrap();
+    assert_eq!(deck.len(), 2, "expected 2 bidirectional notes");
 
     // Verify card types
-    for card in deck {
+    for card in &deck {
         assert_eq!(
             card.card_type,
             anki_wrapper::CardType::BasicReversed,
@@ -196,9 +193,9 @@ fn test_sync_handles_mixed_card_types() {
 "#;
 
     let temp_dir = setup_temp_dir_with_files(&[("mixed.md", content)]);
-    let adapter = run_sync_pipeline(temp_dir.path(), "Mixed");
+    let mut adapter = run_sync_pipeline(temp_dir.path(), "Mixed");
 
-    let deck = adapter.inner().decks.get("Mixed").expect("deck not found");
+    let deck = adapter.get_cards_in_deck("Mixed").unwrap();
     assert_eq!(deck.len(), 2);
 
     let basic_count = deck
@@ -1120,6 +1117,94 @@ fn test_incremental_sync_duplicate_cards_handled() {
     assert_eq!(counts.unchanged, 2);
 }
 
+// =============================================================================
+// Test: Incremental sync — bidirectional (reversed) cards
+// =============================================================================
+
+#[test]
+fn test_incremental_sync_bidirectional_cards_stable() {
+    // A bidirectional card creates one note with two Anki cards internally.
+    // Syncing the same content twice should be a no-op on the second sync.
+    let content = r#"- hello <-> hola
+- goodbye <-> adiós
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: 2 bidirectional notes added
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 2);
+    assert_eq!(counts.deleted, 0);
+
+    // Public API shows 2 notes (deduplicated).
+    let notes = adapter.get_cards_in_deck("Deck").unwrap();
+    assert_eq!(notes.len(), 2);
+
+    // Second sync: everything unchanged
+    let counts = run_incremental_sync(content, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0, "no notes should be added");
+    assert_eq!(counts.deleted, 0, "no notes should be deleted");
+    assert_eq!(counts.unchanged, 2, "both notes should be unchanged");
+}
+
+#[test]
+fn test_incremental_sync_bidirectional_delete_does_not_error() {
+    // Regression: deleting a bidirectional note used to fail because the
+    // code tried to delete each Anki card individually, and the second
+    // delete errored with "Card not found" after the first already removed
+    // the entire note.
+    let content_v1 = r#"- hello <-> hola
+- goodbye <-> adiós
+"#;
+    let content_v2 = r#"- hello <-> hola
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync: 2 bidirectional notes
+    run_incremental_sync(content_v1, "Deck", &mut adapter);
+    assert_eq!(adapter.get_cards_in_deck("Deck").unwrap().len(), 2);
+
+    // Second sync: remove one bidirectional note
+    let counts = run_incremental_sync(content_v2, "Deck", &mut adapter);
+    assert_eq!(counts.added, 0);
+    assert_eq!(counts.deleted, 1, "one note should be deleted");
+    assert_eq!(counts.unchanged, 1, "one note should remain unchanged");
+    assert_eq!(adapter.get_cards_in_deck("Deck").unwrap().len(), 1);
+}
+
+#[test]
+fn test_incremental_sync_bidirectional_edit_replaces_note() {
+    // Editing a bidirectional card should delete the old note and add a new one.
+    use anki_wrapper::{AnkiCollection, ReviewRating};
+
+    let content_v1 = r#"- hello <-> hola
+"#;
+    let content_v2 = r#"- hello <-> hola (greeting)
+"#;
+
+    let mut adapter = AnkiCollectionAdapter::fake();
+
+    // First sync
+    run_incremental_sync(content_v1, "Deck", &mut adapter);
+    let old_note_id = adapter.get_cards_in_deck("Deck").unwrap()[0].note_id;
+
+    // Record a review
+    let card_id = adapter.get_cards_in_deck("Deck").unwrap()[0].id;
+    adapter
+        .inner_mut()
+        .record_review(card_id, ReviewRating::Good)
+        .unwrap();
+
+    // Edit and re-sync
+    let counts = run_incremental_sync(content_v2, "Deck", &mut adapter);
+    assert_eq!(counts.added, 1, "new version of note added");
+    assert_eq!(counts.deleted, 1, "old version of note deleted");
+
+    let new_note_id = adapter.get_cards_in_deck("Deck").unwrap()[0].note_id;
+    assert_ne!(old_note_id, new_note_id, "note ID should change after edit");
+}
+
 // ── Validate command tests ───────────────────────────────────────────────────
 
 #[test]
@@ -1321,9 +1406,9 @@ goodbye | adiós\n\
 good morning | buenos días";
 
     let temp_dir = setup_temp_dir_with_files(&[("vocab.md", content)]);
-    let adapter = run_sync_pipeline(temp_dir.path(), "Vocab");
+    let mut adapter = run_sync_pipeline(temp_dir.path(), "Vocab");
 
-    let deck = adapter.inner().decks.get("Vocab").expect("deck not found");
+    let deck = adapter.get_cards_in_deck("Vocab").unwrap();
     assert_eq!(
         deck.len(),
         3,

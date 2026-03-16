@@ -17,10 +17,77 @@ fn fake_collection_adds_and_clears_cards() {
     };
     col.add_card(&deck, &c1).unwrap();
 
+    // Internal storage has 1 entry (Basic = 1 card per note).
     assert_eq!(col.decks.get(&deck.name).unwrap().len(), 1);
 
     col.clear_deck(&deck).unwrap();
     assert_eq!(col.decks.get(&deck.name).unwrap().len(), 0);
+}
+
+#[test]
+fn fake_collection_reversed_note_creates_two_cards() {
+    let mut col = FakeAnkiCollection::new();
+    let deck = DeckConfig {
+        name: "Test".to_string(),
+    };
+    col.ensure_deck(&deck).unwrap();
+
+    let card = Card {
+        card_type: CardType::BasicReversed,
+        fields: vec!["Front".into(), "Back".into()],
+    };
+    col.add_card(&deck, &card).unwrap();
+
+    // Internal storage: 2 cards for one reversed note.
+    assert_eq!(col.decks[&deck.name].len(), 2);
+    // Both share the same note_id.
+    assert_eq!(
+        col.decks[&deck.name][0].note_id,
+        col.decks[&deck.name][1].note_id
+    );
+    // But have different card IDs.
+    assert_ne!(col.decks[&deck.name][0].id, col.decks[&deck.name][1].id);
+
+    // get_cards_in_deck deduplicates by note, returning 1 entry.
+    let deduped = col.get_cards_in_deck(&deck).unwrap();
+    assert_eq!(deduped.len(), 1);
+}
+
+#[test]
+fn fake_collection_delete_note_removes_all_cards_for_note() {
+    let mut col = FakeAnkiCollection::new();
+    let deck = DeckConfig {
+        name: "Test".to_string(),
+    };
+    col.ensure_deck(&deck).unwrap();
+
+    let card = Card {
+        card_type: CardType::BasicReversed,
+        fields: vec!["Front".into(), "Back".into()],
+    };
+    col.add_card(&deck, &card).unwrap();
+    assert_eq!(col.decks[&deck.name].len(), 2);
+
+    let note_id = col.decks[&deck.name][0].note_id;
+    col.delete_note(note_id).unwrap();
+    assert_eq!(col.decks[&deck.name].len(), 0);
+}
+
+#[test]
+fn fake_collection_delete_note_nonexistent() {
+    let mut col = FakeAnkiCollection::new();
+    let deck = DeckConfig {
+        name: "Test".to_string(),
+    };
+    col.ensure_deck(&deck).unwrap();
+
+    use crate::types::NoteId;
+    let result = col.delete_note(NoteId(999));
+    assert!(result.is_err());
+    match result {
+        Err(AnkiWrapperError::NoteNotFound { id }) => assert_eq!(id, NoteId(999)),
+        _ => panic!("expected NoteNotFound error"),
+    }
 }
 
 #[test]

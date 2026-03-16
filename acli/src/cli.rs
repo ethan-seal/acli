@@ -154,6 +154,30 @@ fn require<T>(value: Option<T>, field_name: &str) -> Result<T, CliError> {
     })
 }
 
+/// Validate a deck name, returning a clear error for common mistakes.
+fn validate_deck_name(name: &str) -> Result<(), CliError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(CliError::ConfigError(
+            "deck name cannot be empty".to_string(),
+        ));
+    }
+    if trimmed.contains('/') {
+        return Err(CliError::ConfigError(format!(
+            "deck name '{}' contains '/'. \
+             Use '::' for hierarchical decks (e.g. 'Languages::Spanish').",
+            name
+        )));
+    }
+    if trimmed.contains('\n') || trimmed.contains('\r') {
+        return Err(CliError::ConfigError(format!(
+            "deck name '{}' contains invalid whitespace characters",
+            name
+        )));
+    }
+    Ok(())
+}
+
 /// The source directory for every command: the current working directory.
 fn source_dir() -> Result<Vec<PathBuf>, CliError> {
     let cwd = std::env::current_dir().map_err(|e| {
@@ -182,6 +206,7 @@ pub fn run() -> Result<(), CliError> {
         } => {
             let cfg = load_config_with_banner()?;
             let deck_name = require(deck.or(cfg.deck), "deck")?;
+            validate_deck_name(&deck_name)?;
             let recursive = if no_recursive {
                 false
             } else {
@@ -204,6 +229,7 @@ pub fn run() -> Result<(), CliError> {
         Commands::Preview { deck, no_recursive } => {
             let cfg = load_config_with_banner()?;
             let deck_name = require(deck.or(cfg.deck), "deck")?;
+            validate_deck_name(&deck_name)?;
             let recursive = if no_recursive {
                 false
             } else {
@@ -268,6 +294,7 @@ fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), 
 
     let cfg = load_config_with_banner()?;
     let deck_name = deck.or(cfg.deck).unwrap_or_else(|| "Preview".to_string());
+    validate_deck_name(&deck_name)?;
     let recursive = if no_recursive {
         false
     } else {

@@ -18,8 +18,8 @@ pub trait AnkiCollection {
         deck_name: &str,
         card: &crate::types::Card,
     ) -> Result<(), Box<dyn std::error::Error>>;
-    /// Delete a card by its ID.
-    fn delete_card(
+    /// Delete a note by its ID.
+    fn delete_note(
         &mut self,
         deck_name: &str,
         card_id: crate::types::CardId,
@@ -61,7 +61,7 @@ impl PlanExecutor for DefaultExecutor {
         for op in &plan.operations {
             match op {
                 Operation::Add(card) => collection.add_card(deck, card)?,
-                Operation::Delete(card_id) => collection.delete_card(deck, *card_id)?,
+                Operation::Delete(card_id) => collection.delete_note(deck, *card_id)?,
                 Operation::Update(card_id, card) => collection.update_card(deck, *card_id, card)?,
             }
         }

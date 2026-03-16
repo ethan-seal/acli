@@ -5,7 +5,9 @@ use crate::adapter::{convert_card as convert_to_anki_card, AnkiCollectionAdapter
 use crate::discovery;
 use crate::error::CliError;
 use crate::output::SyncResult;
-use anki_wrapper::{AnkiCollection as AnkiWrapperCollection, CardInfo, CardType as AnkiCardType};
+use anki_wrapper::{
+    AnkiCollection as AnkiWrapperCollection, CardInfo, CardType as AnkiCardType, NoteId,
+};
 use doc_parser::{Card, DocumentParser, MarkdownParser, MediaReference};
 
 #[derive(Debug, Clone, Default)]
@@ -50,17 +52,21 @@ struct CardContentKey {
 struct IncrementalDiff {
     /// Parsed cards to add (not currently in Anki).
     to_add: Vec<Card>,
-    /// Anki database IDs of cards to delete (in Anki but not in parsed).
-    to_delete: Vec<anki_wrapper::CardId>,
+    /// Note IDs to delete (notes in Anki whose content no longer appears in
+    /// the parsed markdown).  Deduplicated — each note ID appears at most once.
+    to_delete: Vec<NoteId>,
     /// Number of cards that are unchanged (in both parsed and Anki).
     unchanged: usize,
 }
 
 /// Compute the diff between parsed cards and the current Anki deck state.
 ///
+/// The `anki_cards` slice must already be deduplicated by note (one entry per
+/// note), which is the contract of `AnkiCollection::get_cards_in_deck`.
+///
 /// Cards are matched by content: (card_type, fields) after HTML conversion.
 /// - Parsed cards not found in Anki → to_add
-/// - Anki cards not found in parsed → to_delete
+/// - Anki notes not found in parsed → to_delete (by note ID)
 /// - Cards in both → unchanged (reviews preserved)
 fn compute_incremental_diff(parsed_cards: &[Card], anki_cards: &[CardInfo]) -> IncrementalDiff {
     // Convert parsed cards to their Anki representation (HTML fields + mapped type)
@@ -76,7 +82,7 @@ fn compute_incremental_diff(parsed_cards: &[Card], anki_cards: &[CardInfo]) -> I
         })
         .collect();
 
-    // Build content keys for what's currently in Anki
+    // Build content keys for what's currently in Anki (one per note).
     let anki_keys: Vec<CardContentKey> = anki_cards
         .iter()
         .map(|c| CardContentKey {
@@ -86,11 +92,11 @@ fn compute_incremental_diff(parsed_cards: &[Card], anki_cards: &[CardInfo]) -> I
         .collect();
 
     // Use multiset-style matching to handle duplicate cards correctly.
-    // Track which Anki cards have been matched (by index).
+    // Track which Anki notes have been matched (by index).
     let mut anki_matched: Vec<bool> = vec![false; anki_cards.len()];
     let mut parsed_matched: Vec<bool> = vec![false; parsed_cards.len()];
 
-    // Match parsed cards to Anki cards
+    // Match parsed cards to Anki notes
     for (pi, pk) in parsed_keys.iter().enumerate() {
         for (ai, ak) in anki_keys.iter().enumerate() {
             if !anki_matched[ai] && pk == ak {
@@ -108,11 +114,12 @@ fn compute_incremental_diff(parsed_cards: &[Card], anki_cards: &[CardInfo]) -> I
         .map(|(_, c)| c.clone())
         .collect();
 
-    let to_delete: Vec<anki_wrapper::CardId> = anki_cards
+    // Collect note IDs to delete (unmatched Anki notes).
+    let to_delete: Vec<NoteId> = anki_cards
         .iter()
         .enumerate()
         .filter(|(i, _)| !anki_matched[*i])
-        .map(|(_, c)| c.id)
+        .map(|(_, c)| c.note_id)
         .collect();
 
     let unchanged = parsed_matched.iter().filter(|m| **m).count();
@@ -371,11 +378,11 @@ pub fn sync_incremental<C: AnkiWrapperCollection>(
     // 3. Compute diff
     let diff = compute_incremental_diff(parsed_cards, &anki_cards);
 
-    // 4. Delete cards that are no longer in the markdown
-    for card_id in &diff.to_delete {
+    // 4. Delete notes that are no longer in the markdown
+    for note_id in &diff.to_delete {
         adapter
-            .delete_card_by_anki_id(*card_id)
-            .map_err(|e| format!("Failed to delete card: {}", e))?;
+            .delete_note_by_id(*note_id)
+            .map_err(|e| format!("Failed to delete note: {}", e))?;
     }
 
     // 5. Add new cards from the markdown
