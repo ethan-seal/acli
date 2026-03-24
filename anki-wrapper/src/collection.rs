@@ -54,6 +54,14 @@ pub struct DefaultAnkiCollection {
     collection: anki::collection::Collection,
 }
 
+/// Error returned by stubs when real Anki backend is not compiled.
+#[cfg(not(feature = "real-anki"))]
+fn not_compiled_error<T>() -> Result<T> {
+    Err(AnkiWrapperError::AnkiError(
+        "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
+    ))
+}
+
 impl DefaultAnkiCollection {
     #[cfg(not(feature = "real-anki"))]
     pub fn new() -> Self {
@@ -94,69 +102,47 @@ impl AnkiCollection for DefaultAnkiCollection {
     type Error = AnkiWrapperError;
 
     fn add_card(&mut self, _deck: &DeckConfig, _card: &Card) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn clear_deck(&mut self, _deck: &DeckConfig) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn ensure_deck(&mut self, _deck: &DeckConfig) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn create_deck(&mut self, _deck: &DeckConfig) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn delete_deck(&mut self, _deck: &DeckConfig) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn update_card(&mut self, _card_id: CardId, _card: &Card) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn delete_note(&mut self, _note_id: NoteId) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn get_cards_in_deck(&mut self, _deck: &DeckConfig) -> Result<Vec<CardInfo>> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn deck_exists(&mut self, _deck: &DeckConfig) -> Result<bool> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn rename_deck(&mut self, _old_name: &str, _new_name: &str) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn get_all_deck_names(&mut self) -> Result<Vec<String>> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn move_cards_to_deck(
@@ -164,25 +150,63 @@ impl AnkiCollection for DefaultAnkiCollection {
         _card_ids: &[CardId],
         _target_deck: &DeckConfig,
     ) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn record_review(&mut self, _card_id: CardId, _rating: ReviewRating) -> Result<()> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 
     fn get_reviews(&mut self, _card_id: CardId) -> Result<Vec<ReviewEntry>> {
-        Err(AnkiWrapperError::AnkiError(
-            "real Anki backend not compiled (missing 'real-anki' feature)".to_string(),
-        ))
+        not_compiled_error()
     }
 }
 
-// Real Anki implementation using rslib
+// ── Real Anki implementation helpers ──────────────────────────────────────────
+
+/// Find the appropriate notetype for a given card type.
+#[cfg(feature = "real-anki")]
+fn find_notetype(
+    collection: &mut anki::collection::Collection,
+    card_type: &crate::types::CardType,
+) -> Result<anki::notetype::Notetype> {
+    let notetypes = collection
+        .get_all_notetypes()
+        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get notetypes: {}", e)))?;
+
+    let notetype_name = match card_type {
+        crate::types::CardType::Basic => "Basic",
+        crate::types::CardType::BasicReversed => "Basic (and reversed card)",
+    };
+
+    notetypes
+        .iter()
+        .find(|nt| nt.name == notetype_name)
+        .ok_or_else(|| {
+            AnkiWrapperError::AnkiError(format!("{} notetype not found", notetype_name))
+        })
+        .cloned()
+}
+
+/// Set the fields of a note, validating field count.
+///
+/// Both Basic and BasicReversed card types use exactly 2 fields.
+#[cfg(feature = "real-anki")]
+fn set_note_fields(note: &mut anki::notes::Note, fields: &[String]) -> Result<()> {
+    if fields.len() != 2 {
+        return Err(AnkiWrapperError::InvalidCard {
+            reason: format!("Expected 2 fields, got {}", fields.len()),
+        });
+    }
+    note.set_field(0, &fields[0])
+        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 0: {}", e)))?;
+    note.set_field(1, &fields[1])
+        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 1: {}", e)))?;
+    Ok(())
+}
+
+// ── Real Anki implementation ──────────────────────────────────────────────────
+
 #[cfg(feature = "real-anki")]
 impl AnkiCollection for DefaultAnkiCollection {
     type Error = AnkiWrapperError;
@@ -208,54 +232,11 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck_id = DeckId(deck_obj.id.0);
 
         // Get the appropriate notetype based on card type
-        let notetype = match card.card_type {
-            crate::types::CardType::Basic => {
-                // Get the "Basic" notetype (always exists in new collections)
-                let notetypes = self.collection.get_all_notetypes().map_err(|e| {
-                    AnkiWrapperError::AnkiError(format!("Failed to get notetypes: {}", e))
-                })?;
+        let notetype = find_notetype(&mut self.collection, &card.card_type)?;
 
-                // Find the Basic notetype
-                notetypes
-                    .iter()
-                    .find(|nt| nt.name == "Basic")
-                    .ok_or_else(|| {
-                        AnkiWrapperError::AnkiError("Basic notetype not found".to_string())
-                    })?
-                    .clone()
-            }
-            crate::types::CardType::BasicReversed => {
-                // Get or create "Basic (and reversed card)" notetype
-                let notetypes = self.collection.get_all_notetypes().map_err(|e| {
-                    AnkiWrapperError::AnkiError(format!("Failed to get notetypes: {}", e))
-                })?;
-
-                // Find the reversed notetype
-                notetypes
-                    .iter()
-                    .find(|nt| nt.name == "Basic (and reversed card)")
-                    .ok_or_else(|| {
-                        AnkiWrapperError::AnkiError(
-                            "Basic (and reversed card) notetype not found".to_string(),
-                        )
-                    })?
-                    .clone()
-            }
-        };
-
-        // Validate field count
-        if card.fields.len() != 2 {
-            return Err(AnkiWrapperError::InvalidCard {
-                reason: format!("Expected 2 fields, got {}", card.fields.len()),
-            });
-        }
-
-        // Create a new note with the fields
+        // Create a new note and set its fields
         let mut note = Note::new(&notetype);
-        note.set_field(0, &card.fields[0])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 0: {}", e)))?;
-        note.set_field(1, &card.fields[1])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 1: {}", e)))?;
+        set_note_fields(&mut note, &card.fields)?;
 
         // Add the note to the collection
         self.collection
@@ -369,18 +350,8 @@ impl AnkiCollection for DefaultAnkiCollection {
             .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e)))?
             .ok_or_else(|| AnkiWrapperError::AnkiError("Note not found for card".to_string()))?;
 
-        // Validate field count
-        if card.fields.len() != 2 {
-            return Err(AnkiWrapperError::InvalidCard {
-                reason: format!("Expected 2 fields, got {}", card.fields.len()),
-            });
-        }
-
         // Update the note fields
-        note.set_field(0, &card.fields[0])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 0: {}", e)))?;
-        note.set_field(1, &card.fields[1])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 1: {}", e)))?;
+        set_note_fields(&mut note, &card.fields)?;
 
         // Update the note in the collection
         self.collection

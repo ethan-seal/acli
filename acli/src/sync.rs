@@ -156,20 +156,33 @@ impl AnkiCli {
         }
     }
 
-    pub fn sync(&self, config: &SyncConfig) -> Result<SyncResult, CliError> {
-        let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
+    /// Discover, parse, and validate markdown files.
+    ///
+    /// Performs file discovery, document parsing, and media collision checking.
+    /// Returns the list of markdown files and the parsed batch.
+    fn discover_parse_and_validate(
+        &self,
+        source_dirs: &[PathBuf],
+        recursive: bool,
+    ) -> Result<(Vec<PathBuf>, ParsedBatch), CliError> {
+        let markdown_files = self.discover_files(source_dirs, recursive)?;
         let parsed = self.parse_documents(&markdown_files)?;
 
-        // Collect all media refs for collision checking
+        // Check for media filename collisions
         let all_media_refs: Vec<MediaReference> = parsed
             .media_with_dirs
             .iter()
             .flat_map(|(_, refs)| refs.iter().cloned())
             .collect();
-
-        // Check for filename collisions (fail fast)
         crate::media::check_media_collisions(&all_media_refs)
             .map_err(CliError::MediaCollisionError)?;
+
+        Ok((markdown_files, parsed))
+    }
+
+    pub fn sync(&self, config: &SyncConfig) -> Result<SyncResult, CliError> {
+        let (markdown_files, parsed) =
+            self.discover_parse_and_validate(&config.source_dirs, config.recursive)?;
 
         if config.dry_run {
             return Ok(SyncResult::new(
@@ -274,17 +287,8 @@ impl AnkiCli {
 
     /// Parse all markdown files and return the cards that would be synced.
     pub fn preview(&self, config: &SyncConfig) -> Result<PreviewResult, CliError> {
-        let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
-        let parsed = self.parse_documents(&markdown_files)?;
-
-        // Check for media collisions (same as sync — surface errors early).
-        let all_media_refs: Vec<MediaReference> = parsed
-            .media_with_dirs
-            .iter()
-            .flat_map(|(_, refs)| refs.iter().cloned())
-            .collect();
-        crate::media::check_media_collisions(&all_media_refs)
-            .map_err(CliError::MediaCollisionError)?;
+        let (markdown_files, parsed) =
+            self.discover_parse_and_validate(&config.source_dirs, config.recursive)?;
 
         Ok(PreviewResult {
             files_processed: markdown_files.len(),

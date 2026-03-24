@@ -192,20 +192,6 @@ where
         .into())
     }
 
-    fn update_card(
-        &mut self,
-        _deck_name: &str,
-        card_id: PlannerCardId,
-        _card: &PlannerCard,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Same issue as delete_card - we can't map content-hash IDs to database IDs
-        Err(format!(
-            "update_card not supported: content-hash CardId {} cannot be mapped to database ID",
-            card_id
-        )
-        .into())
-    }
-
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // anki-wrapper doesn't have an explicit save method
         // Operations are committed immediately in the real Anki backend

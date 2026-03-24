@@ -24,13 +24,6 @@ pub trait AnkiCollection {
         deck_name: &str,
         card_id: crate::types::CardId,
     ) -> Result<(), Box<dyn std::error::Error>>;
-    /// Update an existing card by ID.
-    fn update_card(
-        &mut self,
-        deck_name: &str,
-        card_id: crate::types::CardId,
-        card: &crate::types::Card,
-    ) -> Result<(), Box<dyn std::error::Error>>;
     /// Persist changes.
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
@@ -62,7 +55,6 @@ impl PlanExecutor for DefaultExecutor {
             match op {
                 Operation::Add(card) => collection.add_card(deck, card)?,
                 Operation::Delete(card_id) => collection.delete_note(deck, *card_id)?,
-                Operation::Update(card_id, card) => collection.update_card(deck, *card_id, card)?,
             }
         }
 

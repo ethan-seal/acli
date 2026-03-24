@@ -12,7 +12,6 @@ fn test_diff_empty_to_empty() {
 
     assert!(diff.added.is_empty());
     assert!(diff.deleted.is_empty());
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -36,7 +35,6 @@ fn test_diff_empty_to_nonempty() {
 
     assert_eq!(diff.added.len(), 2);
     assert!(diff.deleted.is_empty());
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -60,7 +58,6 @@ fn test_diff_nonempty_to_empty() {
 
     assert!(diff.added.is_empty());
     assert_eq!(diff.deleted.len(), 2);
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -89,7 +86,6 @@ fn test_diff_same_cards() {
 
     assert!(diff.added.is_empty());
     assert!(diff.deleted.is_empty());
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -141,7 +137,6 @@ fn test_diff_partial_changes() {
     // Two old cards deleted
     assert_eq!(diff.deleted.len(), 2);
     // With content-based IDs, updates should be empty
-    assert!(diff.updated.is_empty());
 
     // Verify the added cards are the right ones
     let added_fields: Vec<Vec<String>> = diff.added.iter().map(|c| c.fields.clone()).collect();
@@ -226,7 +221,6 @@ fn test_diff_content_change_creates_new_id() {
     // Should be treated as 1 delete + 1 add
     assert_eq!(diff.deleted.len(), 1);
     assert_eq!(diff.added.len(), 1);
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -252,7 +246,6 @@ fn test_diff_card_type_change() {
 
     assert_eq!(diff.deleted.len(), 1);
     assert_eq!(diff.added.len(), 1);
-    assert!(diff.updated.is_empty());
 }
 
 #[test]
@@ -279,7 +272,6 @@ fn test_diff_duplicate_cards() {
     // Since both old cards have the same ID, deleting one means no change from ID perspective
     assert!(diff.added.is_empty());
     assert!(diff.deleted.is_empty());
-    assert!(diff.updated.is_empty());
 }
 
 // ============================================================================
@@ -323,7 +315,6 @@ fn test_integration_complete_replacement() {
     // Should have 2 adds and 2 deletes
     assert_eq!(diff.added.len(), 2);
     assert_eq!(diff.deleted.len(), 2);
-    assert!(diff.updated.is_empty());
 
     let add_count = ops
         .iter()
@@ -333,14 +324,9 @@ fn test_integration_complete_replacement() {
         .iter()
         .filter(|op| matches!(op, Operation::Delete(_)))
         .count();
-    let update_count = ops
-        .iter()
-        .filter(|op| matches!(op, Operation::Update(_, _)))
-        .count();
 
     assert_eq!(add_count, 2);
     assert_eq!(delete_count, 2);
-    assert_eq!(update_count, 0);
     assert_eq!(ops.len(), 4);
 }
 
@@ -485,7 +471,6 @@ fn test_integration_mixed_operations() {
     // Should have 2 adds and 2 deletes (1 unchanged card not in operations)
     assert_eq!(diff.added.len(), 2);
     assert_eq!(diff.deleted.len(), 2);
-    assert!(diff.updated.is_empty());
 
     let add_count = ops
         .iter()
@@ -535,7 +520,6 @@ fn test_integration_reordering_only() {
     // Reordering shouldn't create any operations
     assert!(diff.added.is_empty());
     assert!(diff.deleted.is_empty());
-    assert!(diff.updated.is_empty());
     assert_eq!(ops.len(), 0);
 }
 
@@ -564,7 +548,6 @@ fn test_integration_multiple_field_variations() {
     // Different number of fields means different cards
     assert_eq!(diff.added.len(), 1);
     assert_eq!(diff.deleted.len(), 1);
-    assert!(diff.updated.is_empty());
     assert_eq!(ops.len(), 2);
 }
 
@@ -593,7 +576,6 @@ fn test_integration_whitespace_differences() {
     // Whitespace difference creates different ID
     assert_eq!(diff.added.len(), 1);
     assert_eq!(diff.deleted.len(), 1);
-    assert!(diff.updated.is_empty());
     assert_eq!(ops.len(), 2);
 }
 
@@ -640,7 +622,6 @@ fn test_integration_large_batch_operations() {
     // Should have 25 adds and 25 deletes
     assert_eq!(diff.added.len(), 25);
     assert_eq!(diff.deleted.len(), 25);
-    assert!(diff.updated.is_empty());
 
     let add_count = ops
         .iter()
@@ -736,7 +717,6 @@ fn test_integration_bidirectional_vs_basic_same_content() {
     // Different card types should produce different IDs
     assert_eq!(diff.added.len(), 1);
     assert_eq!(diff.deleted.len(), 1);
-    assert!(diff.updated.is_empty());
     assert_eq!(ops.len(), 2);
 
     // Verify one is Add and one is Delete

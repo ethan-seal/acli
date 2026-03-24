@@ -30,15 +30,6 @@ impl update_planner_parser::executor::AnkiCollection for MockCollection {
         println!("delete_note from {}: {}", deck_name, card_id);
         Ok(())
     }
-    fn update_card(
-        &mut self,
-        deck_name: &str,
-        card_id: update_planner_parser::types::CardId,
-        card: &update_planner_parser::types::Card,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("update_card in {}: {} -> {:?}", deck_name, card_id, card);
-        Ok(())
-    }
     fn save(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("save");
         Ok(())

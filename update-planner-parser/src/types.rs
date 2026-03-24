@@ -64,8 +64,6 @@ pub enum Operation {
     Add(Card),
     /// Delete a card by its ID
     Delete(CardId),
-    /// Update an existing card by ID
-    Update(CardId, Card),
 }
 
 /// A set of parsed documents with extracted cards.
@@ -93,11 +91,6 @@ pub struct DocumentDiff {
     pub added: Vec<Card>,
     /// Cards that exist in old but not in new (to be deleted)
     pub deleted: Vec<Card>,
-    /// Cards with same ID but different content (to be updated)
-    /// Note: With content-based hashing, this will be empty since
-    /// any content change produces a different CardId. This is here
-    /// for future extensibility if we switch to position-based IDs.
-    pub updated: Vec<(Card, Card)>, // (old, new)
 }
 
 impl DocumentDiff {
@@ -126,28 +119,7 @@ impl DocumentDiff {
             .map(|&c| c.clone())
             .collect();
 
-        // Cards with same ID but different content = updated
-        // With content-based hashing, this should always be empty
-        // since any change in content creates a new CardId
-        let updated: Vec<(Card, Card)> = old_ids
-            .intersection(&new_ids)
-            .filter_map(|id| {
-                let old_card = old_map.get(id)?;
-                let new_card = new_map.get(id)?;
-                // If CardIds are the same but cards differ (shouldn't happen with current impl)
-                if old_card != new_card {
-                    Some(((*old_card).clone(), (*new_card).clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        DocumentDiff {
-            added,
-            deleted,
-            updated,
-        }
+        DocumentDiff { added, deleted }
     }
 
     /// Convert this diff into a list of operations.
@@ -162,11 +134,6 @@ impl DocumentDiff {
         // Delete removed cards
         for card in &self.deleted {
             ops.push(Operation::Delete(card.id()));
-        }
-
-        // Update modified cards (should be empty with content-based IDs)
-        for (_old, new) in &self.updated {
-            ops.push(Operation::Update(new.id(), new.clone()));
         }
 
         ops

@@ -189,6 +189,41 @@ fn source_dir() -> Result<Vec<PathBuf>, CliError> {
     Ok(vec![cwd])
 }
 
+/// Resolved configuration values for commands requiring deck and recursive settings.
+struct ResolvedDeckConfig {
+    deck_name: String,
+    recursive: bool,
+    collection: Option<PathBuf>,
+    media_dir: Option<PathBuf>,
+}
+
+/// Resolve configuration for Sync and Preview commands.
+///
+/// Loads config, resolves and validates deck name, resolves recursive flag,
+/// and merges CLI args with config file values.
+fn resolve_deck_config(
+    deck: Option<String>,
+    collection: Option<PathBuf>,
+    media_dir: Option<PathBuf>,
+    no_recursive: bool,
+) -> Result<ResolvedDeckConfig, CliError> {
+    let cfg = load_config_with_banner()?;
+    let deck_name = require(deck.or(cfg.deck), "deck")?;
+    validate_deck_name(&deck_name)?;
+    let recursive = if no_recursive {
+        false
+    } else {
+        cfg.recursive.unwrap_or(true)
+    };
+
+    Ok(ResolvedDeckConfig {
+        deck_name,
+        recursive,
+        collection: collection.or(cfg.collection),
+        media_dir: media_dir.or(cfg.media_dir),
+    })
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn run() -> Result<(), CliError> {
@@ -204,21 +239,14 @@ pub fn run() -> Result<(), CliError> {
             no_recursive,
             dry_run,
         } => {
-            let cfg = load_config_with_banner()?;
-            let deck_name = require(deck.or(cfg.deck), "deck")?;
-            validate_deck_name(&deck_name)?;
-            let recursive = if no_recursive {
-                false
-            } else {
-                cfg.recursive.unwrap_or(true)
-            };
+            let resolved = resolve_deck_config(deck, collection, media_dir, no_recursive)?;
 
             let config = SyncConfig {
                 source_dirs: source_dir()?,
-                deck_name,
-                anki_collection_path: collection.or(cfg.collection),
-                anki_media_dir: media_dir.or(cfg.media_dir),
-                recursive,
+                deck_name: resolved.deck_name,
+                anki_collection_path: resolved.collection,
+                anki_media_dir: resolved.media_dir,
+                recursive: resolved.recursive,
                 dry_run,
             };
 
@@ -227,21 +255,14 @@ pub fn run() -> Result<(), CliError> {
             Ok(())
         }
         Commands::Preview { deck, no_recursive } => {
-            let cfg = load_config_with_banner()?;
-            let deck_name = require(deck.or(cfg.deck), "deck")?;
-            validate_deck_name(&deck_name)?;
-            let recursive = if no_recursive {
-                false
-            } else {
-                cfg.recursive.unwrap_or(true)
-            };
+            let resolved = resolve_deck_config(deck, None, None, no_recursive)?;
 
             let config = SyncConfig {
                 source_dirs: source_dir()?,
-                deck_name,
+                deck_name: resolved.deck_name,
                 anki_collection_path: None,
                 anki_media_dir: None,
-                recursive,
+                recursive: resolved.recursive,
                 dry_run: true,
             };
 
@@ -304,8 +325,10 @@ fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), 
     let cwd = std::env::current_dir().ok();
 
     let refresh = move || -> Result<web_preview::PreviewData, String> {
+        let cli = AnkiCli::new();
         let parser = MarkdownParser::new();
-        let files = crate::discovery::discover_markdown_files(&source_dirs, recursive)
+        let files = cli
+            .discover_files(&source_dirs, recursive)
             .map_err(|e| e.to_string())?;
 
         let mut cards = Vec::new();
