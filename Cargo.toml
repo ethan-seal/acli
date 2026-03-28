@@ -26,6 +26,16 @@ walkdir = "2.5"
 tempfile = "3"
 clap = { version = "4.5", features = ["derive"] }
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+strip = "debuginfo"
+
+[profile.dev]
+debug = "line-tables-only"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 
