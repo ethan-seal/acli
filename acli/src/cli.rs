@@ -310,77 +310,89 @@ pub fn run() -> Result<(), CliError> {
 // ── Serve ─────────────────────────────────────────────────────────────────────
 
 #[cfg(feature = "web")]
-fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), CliError> {
+fn discover_card_files(
+    source_dirs: &[std::path::PathBuf],
+    recursive: bool,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    AnkiCli::new()
+        .discover_files(source_dirs, recursive)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "web")]
+fn parse_and_convert_cards(
+    files: &[std::path::PathBuf],
+    cwd: &Option<std::path::PathBuf>,
+) -> (Vec<web_preview::PreviewCard>, Vec<String>) {
     use doc_parser::{DocumentParser, MarkdownParser};
 
-    let cfg = load_config_with_banner()?;
-    let deck_name = deck.or(cfg.deck).unwrap_or_else(|| "Preview".to_string());
-    validate_deck_name(&deck_name)?;
-    let recursive = if no_recursive {
-        false
-    } else {
-        cfg.recursive.unwrap_or(true)
-    };
-    let source_dirs = source_dir()?;
-    let cwd = std::env::current_dir().ok();
+    let parser = MarkdownParser::new();
+    let mut cards = Vec::new();
+    let mut errors = Vec::new();
 
-    let refresh = move || -> Result<web_preview::PreviewData, String> {
-        let cli = AnkiCli::new();
-        let parser = MarkdownParser::new();
-        let files = cli
-            .discover_files(&source_dirs, recursive)
-            .map_err(|e| e.to_string())?;
-
-        let mut cards = Vec::new();
-        let mut errors = Vec::new();
-
-        for path in &files {
-            let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-            match parser.parse(&content) {
-                Ok(parsed) => {
-                    for w in &parsed.warnings {
-                        errors.push(format!("{}: {w}", path.display()));
-                    }
-                    for card in parsed.cards {
-                        let display_path = if let Some(ref cwd) = cwd {
-                            path.strip_prefix(cwd).unwrap_or(path).display().to_string()
-                        } else {
-                            path.display().to_string()
-                        };
-
-                        // Image URLs in card fields are relative to the
-                        // source file's directory.  Rewrite them so the
-                        // preview server's /media/ route can resolve them.
-                        let source_dir = path.parent().unwrap_or(std::path::Path::new("."));
-                        let source_dir_rel = if let Some(ref cwd) = cwd {
-                            source_dir.strip_prefix(cwd).unwrap_or(source_dir)
-                        } else {
-                            source_dir
-                        };
-                        let front_raw = card.fields.first().map(|s| s.as_str()).unwrap_or("");
-                        let back_raw = card.fields.get(1).map(|s| s.as_str()).unwrap_or("");
-
-                        cards.push(web_preview::PreviewCard {
-                            front: web_preview::rewrite_image_urls(front_raw, source_dir_rel),
-                            back: web_preview::rewrite_image_urls(back_raw, source_dir_rel),
-                            card_type: match card.card_type {
-                                doc_parser::CardType::Basic => web_preview::CardType::Basic,
-                                doc_parser::CardType::Bidirectional => {
-                                    web_preview::CardType::Bidirectional
-                                }
-                                doc_parser::CardType::Sequence => web_preview::CardType::Sequence,
-                            },
-                            source_file: Some(display_path),
-                        });
-                    }
+    for path in files {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                errors.push(format!("{}: {e}", path.display()));
+                continue;
+            }
+        };
+        match parser.parse(&content) {
+            Ok(parsed) => {
+                for w in &parsed.warnings {
+                    errors.push(format!("{}: {w}", path.display()));
                 }
-                Err(doc_parser::ParseError::EmptyDocument) => {}
-                Err(e) => {
-                    errors.push(format!("{}: {e}", path.display()));
+                for card in parsed.cards {
+                    let display_path = match cwd {
+                        Some(ref cwd) => {
+                            path.strip_prefix(cwd).unwrap_or(path).display().to_string()
+                        }
+                        None => path.display().to_string(),
+                    };
+                    let source_dir = path.parent().unwrap_or(std::path::Path::new("."));
+                    let source_dir_rel = match cwd {
+                        Some(ref cwd) => source_dir.strip_prefix(cwd).unwrap_or(source_dir),
+                        None => source_dir,
+                    };
+                    let front_raw = card.fields.first().map(|s| s.as_str()).unwrap_or("");
+                    let back_raw = card.fields.get(1).map(|s| s.as_str()).unwrap_or("");
+                    cards.push(web_preview::PreviewCard {
+                        front: web_preview::rewrite_image_urls(front_raw, source_dir_rel),
+                        back: web_preview::rewrite_image_urls(back_raw, source_dir_rel),
+                        card_type: match card.card_type {
+                            doc_parser::CardType::Basic => web_preview::CardType::Basic,
+                            doc_parser::CardType::Bidirectional => {
+                                web_preview::CardType::Bidirectional
+                            }
+                            doc_parser::CardType::Sequence => web_preview::CardType::Sequence,
+                        },
+                        source_file: Some(display_path),
+                    });
                 }
             }
+            Err(doc_parser::ParseError::EmptyDocument) => {}
+            Err(e) => {
+                errors.push(format!("{}: {e}", path.display()));
+            }
         }
+    }
 
+    (cards, errors)
+}
+
+#[cfg(feature = "web")]
+fn setup_card_server(
+    port: u16,
+    deck_name: String,
+    source_dirs: Vec<std::path::PathBuf>,
+    recursive: bool,
+    cwd: Option<std::path::PathBuf>,
+) -> Result<(), CliError> {
+    let static_root = std::env::current_dir().ok();
+    let refresh = move || -> Result<web_preview::PreviewData, String> {
+        let files = discover_card_files(&source_dirs, recursive)?;
+        let (cards, errors) = parse_and_convert_cards(&files, &cwd);
         Ok(web_preview::PreviewData {
             deck_name: deck_name.clone(),
             cards,
@@ -388,14 +400,20 @@ fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), 
             errors,
         })
     };
-
-    let static_root = std::env::current_dir().ok();
     web_preview::serve(port, static_root, refresh).map_err(|e| {
-        CliError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
+        CliError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     })
+}
+
+#[cfg(feature = "web")]
+fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), CliError> {
+    let cfg = load_config_with_banner()?;
+    let deck_name = deck.or(cfg.deck).unwrap_or_else(|| "Preview".to_string());
+    validate_deck_name(&deck_name)?;
+    let recursive = !no_recursive && cfg.recursive.unwrap_or(true);
+    let source_dirs = source_dir()?;
+    let cwd = std::env::current_dir().ok();
+    setup_card_server(port, deck_name, source_dirs, recursive, cwd)
 }
 
 #[cfg(not(feature = "web"))]

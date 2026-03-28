@@ -1,11 +1,11 @@
 ---
 # acli-mrlx
 title: Refactor run_serve() function (87 lines) in acli/src/cli.rs
-status: todo
+status: completed
 type: task
 priority: normal
 created_at: 2026-03-25T13:58:50Z
-updated_at: 2026-03-25T14:17:39Z
+updated_at: 2026-03-28T18:27:33Z
 parent: acli-mw5z
 ---
 
