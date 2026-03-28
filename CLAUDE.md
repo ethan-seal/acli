@@ -11,6 +11,25 @@ Run `bd prime` for workflow context, or install hooks (`bd hooks install`) for a
 
 For full workflow details: `bd prime`
 
+## Project Structure
+
+This is a Rust workspace with the following crates:
+
+- **`acli`** - Main CLI binary; orchestrates parsing, syncing, and preview
+- **`doc-parser`** - Parses flashcard syntax from markdown files (inline/block cards)
+- **`anki-wrapper`** - Interfaces with Anki database via anki-rs backend
+- **`web-preview`** - Local HTTP server for card preview (uses tiny_http + pulldown_cmark)
+
+### Refactoring Library Crates
+
+When refactoring library crates (doc-parser, anki-wrapper, web-preview):
+
+- **Preserve public API** - Other crates depend on it; check imports with `grep -r "use cratename::" acli/`
+- **Public surface in lib.rs** - Keep public types and re-exports in lib.rs, implementation in modules
+- **Use `pub(crate)` for internals** - Items only used within the crate don't need `pub`
+- **Tests move with code** - `#[cfg(test)]` modules stay in the same file as what they test
+- **Verify both tests and build** - Run `cargo test` and `cargo build` from workspace root
+
 ## Coding Guidelines
 
 ### Meaningful abstractions
