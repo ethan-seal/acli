@@ -164,6 +164,16 @@ impl AnkiCollection for DefaultAnkiCollection {
 
 // ── Real Anki implementation helpers ──────────────────────────────────────────
 
+/// Build an `AnkiWrapperError::AnkiError` from an operation description and an error value.
+///
+/// Returns a closure suitable for use with `.map_err(anki_err("Failed to X"))`.
+#[cfg(feature = "real-anki")]
+fn anki_err(
+    operation: &'static str,
+) -> impl Fn(impl std::fmt::Display) -> AnkiWrapperError {
+    move |e| AnkiWrapperError::AnkiError(format!("{}: {}", operation, e))
+}
+
 /// Find the appropriate notetype for a given card type.
 #[cfg(feature = "real-anki")]
 fn find_notetype(
@@ -172,7 +182,7 @@ fn find_notetype(
 ) -> Result<anki::notetype::Notetype> {
     let notetypes = collection
         .get_all_notetypes()
-        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get notetypes: {}", e)))?;
+        .map_err(anki_err("Failed to get notetypes"))?;
 
     let notetype_name = match card_type {
         crate::types::CardType::Basic => "Basic",
@@ -199,9 +209,9 @@ fn set_note_fields(note: &mut anki::notes::Note, fields: &[String]) -> Result<()
         });
     }
     note.set_field(0, &fields[0])
-        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 0: {}", e)))?;
+        .map_err(anki_err("Failed to set field 0"))?;
     note.set_field(1, &fields[1])
-        .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to set field 1: {}", e)))?;
+        .map_err(anki_err("Failed to set field 1"))?;
     Ok(())
 }
 
@@ -214,7 +224,7 @@ impl AnkiCollection for DefaultAnkiCollection {
     fn ensure_deck(&mut self, deck: &DeckConfig) -> Result<()> {
         self.collection
             .get_or_create_normal_deck(&deck.name)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to ensure deck: {}", e)))?;
+            .map_err(anki_err("Failed to ensure deck"))?;
         Ok(())
     }
 
@@ -226,9 +236,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck_obj = self
             .collection
             .get_or_create_normal_deck(&deck.name)
-            .map_err(|e| {
-                AnkiWrapperError::AnkiError(format!("Failed to get/create deck: {}", e))
-            })?;
+            .map_err(anki_err("Failed to get/create deck"))?;
         let deck_id = DeckId(deck_obj.id.0);
 
         // Get the appropriate notetype based on card type
@@ -241,7 +249,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Add the note to the collection
         self.collection
             .add_note(&mut note, deck_id)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to add note: {}", e)))?;
+            .map_err(anki_err("Failed to add note"))?;
 
         Ok(())
     }
@@ -253,7 +261,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let _deck_id = self
             .collection
             .get_deck_id(&deck.name)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get deck ID: {}", e)))?
+            .map_err(anki_err("Failed to get deck ID"))?
             .ok_or_else(|| AnkiWrapperError::DeckNotFound {
                 name: deck.name.clone(),
             })?;
@@ -263,7 +271,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let card_ids = self
             .collection
             .search_cards(&search_query, SortMode::NoOrder)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to search cards: {}", e)))?;
+            .map_err(anki_err("Failed to search cards"))?;
 
         if card_ids.is_empty() {
             return Ok(());
@@ -273,9 +281,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let mut note_ids = Vec::new();
         for card_id in &card_ids {
             if let Some(card) =
-                self.collection.storage.get_card(*card_id).map_err(|e| {
-                    AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e))
-                })?
+                self.collection.storage.get_card(*card_id).map_err(anki_err("Failed to get card"))?
             {
                 note_ids.push(card.note_id());
             }
@@ -287,9 +293,7 @@ impl AnkiCollection for DefaultAnkiCollection {
 
         // Remove the notes (this will also remove the cards)
         if !note_ids.is_empty() {
-            self.collection.remove_notes(&note_ids).map_err(|e| {
-                AnkiWrapperError::AnkiError(format!("Failed to remove notes: {}", e))
-            })?;
+            self.collection.remove_notes(&note_ids).map_err(anki_err("Failed to remove notes"))?;
         }
 
         Ok(())
@@ -297,9 +301,10 @@ impl AnkiCollection for DefaultAnkiCollection {
 
     fn create_deck(&mut self, deck: &DeckConfig) -> Result<()> {
         // Check if deck already exists
-        let existing_deck_id = self.collection.get_deck_id(&deck.name).map_err(|e| {
-            AnkiWrapperError::AnkiError(format!("Failed to check deck existence: {}", e))
-        })?;
+        let existing_deck_id = self
+            .collection
+            .get_deck_id(&deck.name)
+            .map_err(anki_err("Failed to check deck existence"))?;
 
         if existing_deck_id.is_some() {
             return Err(AnkiWrapperError::DeckAlreadyExists {
@@ -310,7 +315,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Create the deck
         self.collection
             .get_or_create_normal_deck(&deck.name)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to create deck: {}", e)))?;
+            .map_err(anki_err("Failed to create deck"))?;
 
         Ok(())
     }
@@ -320,7 +325,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck_id = self
             .collection
             .get_deck_id(&deck.name)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get deck ID: {}", e)))?
+            .map_err(anki_err("Failed to get deck ID"))?
             .ok_or_else(|| AnkiWrapperError::DeckNotFound {
                 name: deck.name.clone(),
             })?;
@@ -328,7 +333,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Remove the deck and its children (this will also remove all cards in it)
         self.collection
             .remove_decks_and_child_decks(&[deck_id])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to delete deck: {}", e)))?;
+            .map_err(anki_err("Failed to delete deck"))?;
 
         Ok(())
     }
@@ -339,7 +344,7 @@ impl AnkiCollection for DefaultAnkiCollection {
             .collection
             .storage
             .get_card(anki::card::CardId(card_id.0))
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e)))?
+            .map_err(anki_err("Failed to get card"))?
             .ok_or_else(|| AnkiWrapperError::CardNotFound { id: card_id })?;
 
         // Get the note
@@ -347,7 +352,7 @@ impl AnkiCollection for DefaultAnkiCollection {
             .collection
             .storage
             .get_note(anki_card.note_id())
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e)))?
+            .map_err(anki_err("Failed to get note"))?
             .ok_or_else(|| AnkiWrapperError::AnkiError("Note not found for card".to_string()))?;
 
         // Update the note fields
@@ -356,7 +361,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Update the note in the collection
         self.collection
             .update_note(&mut note)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to update note: {}", e)))?;
+            .map_err(anki_err("Failed to update note"))?;
 
         Ok(())
     }
@@ -369,13 +374,13 @@ impl AnkiCollection for DefaultAnkiCollection {
             .collection
             .storage
             .get_note(anki_note_id)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e)))?
+            .map_err(anki_err("Failed to get note"))?
             .ok_or_else(|| AnkiWrapperError::NoteNotFound { id: note_id })?;
 
         // Remove the note (and all its cards).
         self.collection
             .remove_notes(&[anki_note_id])
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to remove note: {}", e)))?;
+            .map_err(anki_err("Failed to remove note"))?;
 
         Ok(())
     }
@@ -389,7 +394,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let card_ids = self
             .collection
             .search_cards(&search_query, SortMode::NoOrder)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to search cards: {}", e)))?;
+            .map_err(anki_err("Failed to search cards"))?;
 
         let mut result = Vec::new();
         let mut seen_notes = HashSet::new();
@@ -399,7 +404,7 @@ impl AnkiCollection for DefaultAnkiCollection {
                 .collection
                 .storage
                 .get_card(anki_card_id)
-                .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e)))?
+                .map_err(anki_err("Failed to get card"))?
             {
                 Some(c) => c,
                 None => continue,
@@ -416,9 +421,7 @@ impl AnkiCollection for DefaultAnkiCollection {
                 .collection
                 .storage
                 .get_note(anki_card.note_id())
-                .map_err(|e| {
-                    AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e))
-                })?
+                .map_err(anki_err("Failed to get note"))?
             {
                 Some(n) => n,
                 None => continue,
@@ -428,9 +431,7 @@ impl AnkiCollection for DefaultAnkiCollection {
             let notetype = self
                 .collection
                 .get_notetype(note.notetype_id)
-                .map_err(|e| {
-                    AnkiWrapperError::AnkiError(format!("Failed to get notetype: {}", e))
-                })?
+                .map_err(anki_err("Failed to get notetype"))?
                 .ok_or_else(|| {
                     AnkiWrapperError::AnkiError("Notetype not found".to_string())
                 })?;
@@ -453,9 +454,10 @@ impl AnkiCollection for DefaultAnkiCollection {
     }
 
     fn deck_exists(&mut self, deck: &DeckConfig) -> Result<bool> {
-        let deck_id = self.collection.get_deck_id(&deck.name).map_err(|e| {
-            AnkiWrapperError::AnkiError(format!("Failed to check deck existence: {}", e))
-        })?;
+        let deck_id = self
+            .collection
+            .get_deck_id(&deck.name)
+            .map_err(anki_err("Failed to check deck existence"))?;
         Ok(deck_id.is_some())
     }
 
@@ -464,7 +466,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck_id = self
             .collection
             .get_deck_id(old_name)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get deck ID: {}", e)))?
+            .map_err(anki_err("Failed to get deck ID"))?
             .ok_or_else(|| AnkiWrapperError::DeckNotFound {
                 name: old_name.to_string(),
             })?;
@@ -473,7 +475,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck = self
             .collection
             .get_deck(deck_id)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get deck: {}", e)))?
+            .map_err(anki_err("Failed to get deck"))?
             .ok_or_else(|| AnkiWrapperError::DeckNotFound {
                 name: old_name.to_string(),
             })?;
@@ -486,7 +488,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Add or update the deck
         self.collection
             .add_or_update_deck(&mut deck_mut)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to rename deck: {}", e)))?;
+            .map_err(anki_err("Failed to rename deck"))?;
 
         Ok(())
     }
@@ -495,7 +497,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let all_deck_names = self
             .collection
             .get_all_deck_names(false)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get all decks: {}", e)))?;
+            .map_err(anki_err("Failed to get all decks"))?;
 
         Ok(all_deck_names.into_iter().map(|(_, name)| name).collect())
     }
@@ -505,9 +507,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let deck_obj = self
             .collection
             .get_or_create_normal_deck(&target_deck.name)
-            .map_err(|e| {
-                AnkiWrapperError::AnkiError(format!("Failed to get/create target deck: {}", e))
-            })?;
+            .map_err(anki_err("Failed to get/create target deck"))?;
         let deck_id = anki::decks::DeckId(deck_obj.id.0);
 
         // Convert CardId to anki::card::CardId
@@ -517,7 +517,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         // Move cards to the deck
         self.collection
             .set_deck(&anki_card_ids, deck_id)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to move cards: {}", e)))?;
+            .map_err(anki_err("Failed to move cards"))?;
 
         Ok(())
     }
@@ -527,7 +527,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let rating_i32 = rating as i32;
         self.collection
             .grade_now(&[anki_card_id], rating_i32)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to record review: {}", e)))?;
+            .map_err(anki_err("Failed to record review"))?;
         Ok(())
     }
 
@@ -536,7 +536,7 @@ impl AnkiCollection for DefaultAnkiCollection {
         let review_logs = self
             .collection
             .get_review_logs(anki_card_id)
-            .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get reviews: {}", e)))?;
+            .map_err(anki_err("Failed to get reviews"))?;
 
         let reviews = review_logs
             .entries

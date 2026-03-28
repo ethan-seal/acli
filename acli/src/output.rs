@@ -101,11 +101,7 @@ impl CliOutput {
         }
         println!();
         for (i, card) in result.cards.iter().enumerate() {
-            let type_label = match card.card_type {
-                doc_parser::CardType::Basic => "basic",
-                doc_parser::CardType::Bidirectional => "bidi",
-                doc_parser::CardType::Sequence => "sequence",
-            };
+            let type_label = card.card_type.as_label();
             // Show front (first field), truncated to one line.
             let front = card.fields.first().map(|s| s.as_str()).unwrap_or("");
             let front_line = first_line(front);

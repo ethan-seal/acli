@@ -1,11 +1,11 @@
 ---
 # acli-gnbr
 title: Remove code duplication patterns (3+ occurrences)
-status: todo
+status: completed
 type: task
 priority: normal
 created_at: 2026-03-25T13:59:00Z
-updated_at: 2026-03-25T14:17:39Z
+updated_at: 2026-03-28T18:34:04Z
 parent: acli-mw5z
 ---
 

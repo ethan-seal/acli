@@ -43,18 +43,13 @@ impl<C> AnkiCollectionAdapter<C> {
 impl<C: AnkiWrapperCollection> AnkiCollectionAdapter<C> {
     /// Ensure a deck exists, creating it if needed.
     pub fn ensure_deck(&mut self, deck_name: &str) -> Result<(), C::Error> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
-        self.inner.ensure_deck(&deck)
+        self.inner.ensure_deck(&deck_config(deck_name))
     }
 
     /// Get all cards currently in the given deck.
     /// Returns an empty vec if the deck doesn't exist.
     pub fn get_cards_in_deck(&mut self, deck_name: &str) -> Result<Vec<CardInfo>, C::Error> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
+        let deck = deck_config(deck_name);
         match self.inner.get_cards_in_deck(&deck) {
             Ok(cards) => Ok(cards),
             Err(e) => {
@@ -80,11 +75,8 @@ impl<C: AnkiWrapperCollection> AnkiCollectionAdapter<C> {
         deck_name: &str,
         card: &PlannerCard,
     ) -> Result<(), C::Error> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
         let anki_card = convert_card(card);
-        self.inner.add_card(&deck, &anki_card)
+        self.inner.add_card(&deck_config(deck_name), &anki_card)
     }
 
     /// Save/persist changes.
@@ -99,6 +91,13 @@ impl AnkiCollectionAdapter<FakeAnkiCollection> {
     /// Create a new adapter with a fake in-memory collection (for testing).
     pub fn fake() -> Self {
         Self::new(FakeAnkiCollection::new())
+    }
+}
+
+/// Create a `DeckConfig` from a deck name string.
+fn deck_config(name: &str) -> DeckConfig {
+    DeckConfig {
+        name: name.to_string(),
     }
 }
 
@@ -142,20 +141,14 @@ where
     C: AnkiWrapperCollection,
 {
     fn ensure_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
         self.inner
-            .ensure_deck(&deck)
+            .ensure_deck(&deck_config(deck_name))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
     fn clear_deck(&mut self, deck_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
         self.inner
-            .clear_deck(&deck)
+            .clear_deck(&deck_config(deck_name))
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 
@@ -164,12 +157,9 @@ where
         deck_name: &str,
         card: &PlannerCard,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let deck = DeckConfig {
-            name: deck_name.to_string(),
-        };
         let anki_card = convert_card(card);
         self.inner
-            .add_card(&deck, &anki_card)
+            .add_card(&deck_config(deck_name), &anki_card)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
     }
 

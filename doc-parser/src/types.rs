@@ -43,6 +43,19 @@ pub enum CardType {
     Sequence,
 }
 
+impl CardType {
+    /// Return a short display label for this card type.
+    ///
+    /// These labels are used in CLI output (e.g. `[basic]`, `[bidi]`).
+    pub fn as_label(&self) -> &'static str {
+        match self {
+            CardType::Basic => "basic",
+            CardType::Bidirectional => "bidi",
+            CardType::Sequence => "sequence",
+        }
+    }
+}
+
 /// A single card with its type and fields.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Card {
