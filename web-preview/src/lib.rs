@@ -13,6 +13,21 @@ mod url_rewriting;
 pub use server::serve;
 pub use url_rewriting::rewrite_image_urls;
 
+// ── Error type ────────────────────────────────────────────────────────────────
+
+/// Errors that can occur in the web-preview crate.
+#[derive(Debug, thiserror::Error)]
+pub enum WebPreviewError {
+    #[error("failed to bind to port {port}: {source}")]
+    Bind {
+        port: u16,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("invalid HTTP header: name or value contained non-ASCII bytes")]
+    InvalidHeader,
+}
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 /// Card type for preview display.

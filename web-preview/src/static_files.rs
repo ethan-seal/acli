@@ -43,8 +43,8 @@ pub(crate) fn serve_static_file(
     };
 
     let content_type = mime_for_path(&canonical);
-    let header =
-        tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap();
+    let header = tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
+        .expect("mime_for_path returns valid ASCII MIME type strings");
     let response = tiny_http::Response::from_file(file).with_header(header);
     let _ = request.respond(response);
 }

@@ -2,7 +2,7 @@
 
 use crate::renderer::{render_error_page, render_page};
 use crate::static_files::serve_static_file;
-use crate::PreviewData;
+use crate::{PreviewData, WebPreviewError};
 use std::path::PathBuf;
 
 /// Start a blocking web server that serves the card preview page.
@@ -17,13 +17,15 @@ pub fn serve<F>(
     port: u16,
     static_dir: Option<PathBuf>,
     refresh: F,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), WebPreviewError>
 where
     F: Fn() -> Result<PreviewData, String>,
 {
     let addr = format!("0.0.0.0:{port}");
-    let server = tiny_http::Server::http(&addr)
-        .map_err(|e| format!("failed to bind to port {port}: {e}"))?;
+    let server = tiny_http::Server::http(&addr).map_err(|e| WebPreviewError::Bind {
+        port,
+        source: e.into(),
+    })?;
 
     eprintln!("Serving card preview at http://localhost:{port}");
     eprintln!("Press Ctrl+C to stop.");
@@ -42,15 +44,14 @@ where
                 Ok(data) => (render_page(&data), 200),
                 Err(e) => (render_error_page(&e), 500),
             };
+            let content_type_header = tiny_http::Header::from_bytes(
+                &b"Content-Type"[..],
+                &b"text/html; charset=utf-8"[..],
+            )
+            .map_err(|_| WebPreviewError::InvalidHeader)?;
             let response = tiny_http::Response::from_string(&html)
                 .with_status_code(status)
-                .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"text/html; charset=utf-8"[..],
-                    )
-                    .unwrap(),
-                );
+                .with_header(content_type_header);
             let _ = request.respond(response);
         } else if url == "/favicon.ico" {
             let response = tiny_http::Response::from_string("").with_status_code(204);

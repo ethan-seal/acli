@@ -10,3 +10,4 @@ path = "src/lib.rs"
 [dependencies]
 tiny_http = "0.12"
 pulldown-cmark = { version = "0.9", default-features = false }
+thiserror = "1"
