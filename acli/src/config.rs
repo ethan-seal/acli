@@ -288,6 +288,8 @@ bogus = true
         assert_eq!(merged, ConfigFile::default());
     }
 
+    #[allow(unsafe_code)]
+    // SAFETY: env var manipulation is needed for testing; tests are single-threaded.
     #[test]
     fn test_user_config_path_uses_xdg() {
         // Save and override XDG_CONFIG_HOME.
@@ -302,6 +304,8 @@ bogus = true
         assert_eq!(path, PathBuf::from("/tmp/xdg-test/acli/config.toml"));
     }
 
+    #[allow(unsafe_code)]
+    // SAFETY: env var manipulation is needed for testing; tests are single-threaded.
     #[test]
     fn test_user_config_path_falls_back_to_home() {
         let prev_xdg = env::var_os("XDG_CONFIG_HOME");

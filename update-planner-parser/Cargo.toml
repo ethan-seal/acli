@@ -7,6 +7,9 @@ edition = "2021"
 name = "update_planner_parser"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 
 [dev-dependencies]

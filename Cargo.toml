@@ -11,3 +11,10 @@ exclude = [
 ]
 resolver = "2"
 default-members = ["acli", "doc-parser", "update-planner-parser", "web-preview"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = "warn"
+unwrap_used = "warn"

@@ -7,6 +7,9 @@ edition = "2021"
 name = "web_preview"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 tiny_http = "0.12"
 pulldown-cmark = { version = "0.9", default-features = false }

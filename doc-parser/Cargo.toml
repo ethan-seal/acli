@@ -7,6 +7,9 @@ edition = "2021"
 name = "doc_parser"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 thiserror = "1.0"
 pulldown-cmark = { version = "0.9", default-features = false }
