@@ -7,13 +7,13 @@ name = "acli"
 version = "0.1.0"
 dependencies = [
  "anki-wrapper",
+ "anyhow",
  "clap",
  "doc-parser",
  "pulldown-cmark 0.9.6",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 1.0.69",
  "toml",
  "update-planner-parser",
  "walkdir",
@@ -5531,6 +5531,7 @@ name = "web-preview"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark 0.9.6",
+ "thiserror 1.0.69",
  "tiny_http",
 ]
 
