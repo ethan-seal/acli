@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use anyhow::{Context, Result, anyhow, bail};
+
 use crate::config::{self, ConfigFile};
-use crate::error::CliError;
 use crate::output::CliOutput;
 use crate::sync::{AnkiCli, SyncConfig, ValidationConfig};
 
@@ -134,7 +135,7 @@ impl From<RatingArg> for anki_wrapper::ReviewRating {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Load and merge both config files.  Print a banner line for each file found.
-fn load_config_with_banner() -> Result<ConfigFile, CliError> {
+fn load_config_with_banner() -> Result<ConfigFile> {
     let resolved = config::load_config()?;
     if let Some(ref p) = resolved.user_path {
         eprintln!("Using user config: {}", p.display());
@@ -146,46 +147,37 @@ fn load_config_with_banner() -> Result<ConfigFile, CliError> {
 }
 
 /// Require a value, producing a clear error if missing from both configs and CLI.
-fn require<T>(value: Option<T>, field_name: &str) -> Result<T, CliError> {
+fn require<T>(value: Option<T>, field_name: &str) -> Result<T> {
     value.ok_or_else(|| {
-        CliError::ConfigError(format!(
-            "`{field_name}` is required. Set it in .acli.toml or pass --{field_name}.",
-        ))
+        anyhow!("`{field_name}` is required. Set it in .acli.toml or pass --{field_name}.")
     })
 }
 
 /// Validate a deck name, returning a clear error for common mistakes.
-fn validate_deck_name(name: &str) -> Result<(), CliError> {
+fn validate_deck_name(name: &str) -> Result<()> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(CliError::ConfigError(
-            "deck name cannot be empty".to_string(),
-        ));
+        bail!("deck name cannot be empty");
     }
     if trimmed.contains('/') {
-        return Err(CliError::ConfigError(format!(
+        bail!(
             "deck name '{}' contains '/'. \
              Use '::' for hierarchical decks (e.g. 'Languages::Spanish').",
             name
-        )));
+        );
     }
     if trimmed.contains('\n') || trimmed.contains('\r') {
-        return Err(CliError::ConfigError(format!(
+        bail!(
             "deck name '{}' contains invalid whitespace characters",
             name
-        )));
+        );
     }
     Ok(())
 }
 
 /// The source directory for every command: the current working directory.
-fn source_dir() -> Result<Vec<PathBuf>, CliError> {
-    let cwd = std::env::current_dir().map_err(|e| {
-        CliError::IoError(std::io::Error::new(
-            e.kind(),
-            format!("cannot read cwd: {e}"),
-        ))
-    })?;
+fn source_dir() -> Result<Vec<PathBuf>> {
+    let cwd = std::env::current_dir().context("cannot read cwd")?;
     Ok(vec![cwd])
 }
 
@@ -206,7 +198,7 @@ fn resolve_deck_config(
     collection: Option<PathBuf>,
     media_dir: Option<PathBuf>,
     no_recursive: bool,
-) -> Result<ResolvedDeckConfig, CliError> {
+) -> Result<ResolvedDeckConfig> {
     let cfg = load_config_with_banner()?;
     let deck_name = require(deck.or(cfg.deck), "deck")?;
     validate_deck_name(&deck_name)?;
@@ -226,7 +218,7 @@ fn resolve_deck_config(
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub fn run() -> Result<(), CliError> {
+pub fn run() -> Result<()> {
     let args = Cli::parse();
     let cli = AnkiCli::new();
     let output = CliOutput;
@@ -388,7 +380,7 @@ fn setup_card_server(
     source_dirs: Vec<std::path::PathBuf>,
     recursive: bool,
     cwd: Option<std::path::PathBuf>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let static_root = std::env::current_dir().ok();
     let refresh = move || -> Result<web_preview::PreviewData, String> {
         let files = discover_card_files(&source_dirs, recursive)?;
@@ -400,13 +392,12 @@ fn setup_card_server(
             errors,
         })
     };
-    web_preview::serve(port, static_root, refresh).map_err(|e| {
-        CliError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-    })
+    web_preview::serve(port, static_root, refresh)
+        .map_err(|e| anyhow!("Web server error: {}", e))
 }
 
 #[cfg(feature = "web")]
-fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), CliError> {
+fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<()> {
     let cfg = load_config_with_banner()?;
     let deck_name = deck.or(cfg.deck).unwrap_or_else(|| "Preview".to_string());
     validate_deck_name(&deck_name)?;
@@ -417,24 +408,20 @@ fn run_serve(deck: Option<String>, port: u16, no_recursive: bool) -> Result<(), 
 }
 
 #[cfg(not(feature = "web"))]
-fn run_serve(_deck: Option<String>, _port: u16, _no_recursive: bool) -> Result<(), CliError> {
-    Err(CliError::ConfigError(
+fn run_serve(_deck: Option<String>, _port: u16, _no_recursive: bool) -> Result<()> {
+    bail!(
         "serve requires building with --features web.\n\
          Install with: cargo install acli --features web"
-            .to_string(),
-    ))
+    )
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-fn run_init(user: bool) -> Result<(), CliError> {
+fn run_init(user: bool) -> Result<()> {
     if user {
         let target = config::user_config_path();
         if target.exists() {
-            return Err(CliError::ConfigError(format!(
-                "{} already exists",
-                target.display()
-            )));
+            bail!("{} already exists", target.display());
         }
         // Create parent directories (e.g. ~/.config/acli/).
         if let Some(parent) = target.parent() {
@@ -445,10 +432,10 @@ fn run_init(user: bool) -> Result<(), CliError> {
     } else {
         let target = PathBuf::from(config::PROJECT_CONFIG_FILENAME);
         if target.exists() {
-            return Err(CliError::ConfigError(format!(
+            bail!(
                 "{} already exists in the current directory",
                 config::PROJECT_CONFIG_FILENAME
-            )));
+            );
         }
         std::fs::write(&target, config::project_starter_config())?;
         println!("Created {}", target.display());
@@ -460,7 +447,7 @@ fn run_review_card(
     card_id: i64,
     rating: RatingArg,
     collection_path: &PathBuf,
-) -> Result<(), CliError> {
+) -> Result<()> {
     let anki_card_id = anki_wrapper::CardId(card_id);
     let anki_rating: anki_wrapper::ReviewRating = rating.into();
 
@@ -468,10 +455,10 @@ fn run_review_card(
     {
         use anki_wrapper::{AnkiCollection, DefaultAnkiCollection};
         let mut collection = DefaultAnkiCollection::open_collection_path(collection_path)
-            .map_err(|e| CliError::AnkiError(e.to_string()))?;
+            .map_err(|e| anyhow!("Failed to open Anki collection: {}", e))?;
         collection
             .record_review(anki_card_id, anki_rating)
-            .map_err(|e| CliError::AnkiError(e.to_string()))?;
+            .map_err(|e| anyhow!("Failed to record review: {}", e))?;
         println!(
             "Recorded review for card {} with rating {:?}",
             card_id, anki_rating
@@ -482,23 +469,21 @@ fn run_review_card(
     #[cfg(not(feature = "real-anki"))]
     {
         let _ = (anki_card_id, anki_rating, collection_path);
-        Err(CliError::AnkiError(
-            "review-card requires the real-anki feature".to_string(),
-        ))
+        bail!("review-card requires the real-anki feature")
     }
 }
 
-fn run_get_reviews(card_id: i64, collection_path: &PathBuf) -> Result<(), CliError> {
+fn run_get_reviews(card_id: i64, collection_path: &PathBuf) -> Result<()> {
     let anki_card_id = anki_wrapper::CardId(card_id);
 
     #[cfg(feature = "real-anki")]
     {
         use anki_wrapper::{AnkiCollection, DefaultAnkiCollection};
         let mut collection = DefaultAnkiCollection::open_collection_path(collection_path)
-            .map_err(|e| CliError::AnkiError(e.to_string()))?;
+            .map_err(|e| anyhow!("Failed to open Anki collection: {}", e))?;
         let reviews = collection
             .get_reviews(anki_card_id)
-            .map_err(|e| CliError::AnkiError(e.to_string()))?;
+            .map_err(|e| anyhow!("Failed to get reviews: {}", e))?;
 
         let json_entries: Vec<serde_json::Value> = reviews
             .iter()
@@ -514,7 +499,7 @@ fn run_get_reviews(card_id: i64, collection_path: &PathBuf) -> Result<(), CliErr
         println!(
             "{}",
             serde_json::to_string_pretty(&json_entries)
-                .map_err(|e| CliError::AnkiError(e.to_string()))?
+                .context("Failed to serialize reviews to JSON")?
         );
         Ok(())
     }
@@ -522,8 +507,6 @@ fn run_get_reviews(card_id: i64, collection_path: &PathBuf) -> Result<(), CliErr
     #[cfg(not(feature = "real-anki"))]
     {
         let _ = (anki_card_id, collection_path);
-        Err(CliError::AnkiError(
-            "get-reviews requires the real-anki feature".to_string(),
-        ))
+        bail!("get-reviews requires the real-anki feature")
     }
 }

@@ -1,6 +1,3 @@
-fn main() {
-    if let Err(err) = acli::run() {
-        eprintln!("error: {err}");
-        std::process::exit(1);
-    }
+fn main() -> anyhow::Result<()> {
+    acli::run()
 }

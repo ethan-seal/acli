@@ -20,9 +20,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
 use serde::Deserialize;
-
-use crate::error::CliError;
 
 /// Name of the project-local config file.
 pub const PROJECT_CONFIG_FILENAME: &str = ".acli.toml";
@@ -69,17 +68,12 @@ pub struct ResolvedConfig {
 ///
 /// Returns the merged config plus the paths of whichever files were found.
 /// Returns an error if a config file exists but cannot be read or parsed.
-pub fn load_config() -> Result<ResolvedConfig, CliError> {
+pub fn load_config() -> Result<ResolvedConfig> {
     let user = load_file(&user_config_path())?;
     let user_path = user.as_ref().map(|_| user_config_path());
     let user_cfg = user.unwrap_or_default();
 
-    let cwd = env::current_dir().map_err(|e| {
-        CliError::IoError(std::io::Error::new(
-            e.kind(),
-            format!("cannot read cwd: {e}"),
-        ))
-    })?;
+    let cwd = env::current_dir().context("cannot read cwd")?;
     let project_file = find_project_config(&cwd);
     let project_path = project_file.clone();
     let project_cfg = match project_file {
@@ -96,13 +90,13 @@ pub fn load_config() -> Result<ResolvedConfig, CliError> {
 
 /// Load and parse a single config file.  Returns `Ok(None)` if the file
 /// does not exist.
-fn load_file(path: &Path) -> Result<Option<ConfigFile>, CliError> {
+fn load_file(path: &Path) -> Result<Option<ConfigFile>> {
     if !path.is_file() {
         return Ok(None);
     }
     let raw = fs::read_to_string(path)?;
     let config: ConfigFile = toml::from_str(&raw)
-        .map_err(|e| CliError::ConfigError(format!("{}: {}", path.display(), e)))?;
+        .with_context(|| format!("{}: failed to parse config", path.display()))?;
     Ok(Some(config))
 }
 

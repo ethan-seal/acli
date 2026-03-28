@@ -1,19 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{bail, Result};
 use walkdir::WalkDir;
-
-use crate::error::CliError;
 
 pub fn discover_markdown_files(
     sources: &[PathBuf],
     recursive: bool,
-) -> Result<Vec<PathBuf>, CliError> {
+) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
     for source in sources {
         if !source.exists() {
-            return Err(CliError::InvalidPath(source.clone()));
+            bail!("invalid path: {}", source.display());
         }
 
         if source.is_file() {
@@ -28,7 +27,7 @@ pub fn discover_markdown_files(
             continue;
         }
 
-        return Err(CliError::InvalidPath(source.clone()));
+        bail!("invalid path: {}", source.display());
     }
 
     files.sort();
@@ -40,7 +39,7 @@ fn discover_in_directory(
     directory: &Path,
     recursive: bool,
     output: &mut Vec<PathBuf>,
-) -> Result<(), CliError> {
+) -> Result<()> {
     if recursive {
         for entry in WalkDir::new(directory) {
             let entry = entry?;

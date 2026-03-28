@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use anyhow::{Result, anyhow, bail};
+
 use crate::adapter::{convert_card as convert_to_anki_card, AnkiCollectionAdapter};
 use crate::discovery;
-use crate::error::CliError;
 use crate::output::SyncResult;
 use anki_wrapper::{
     AnkiCollection as AnkiWrapperCollection, CardInfo, CardType as AnkiCardType, NoteId,
@@ -164,7 +165,7 @@ impl AnkiCli {
         &self,
         source_dirs: &[PathBuf],
         recursive: bool,
-    ) -> Result<(Vec<PathBuf>, ParsedBatch), CliError> {
+    ) -> Result<(Vec<PathBuf>, ParsedBatch)> {
         let markdown_files = self.discover_files(source_dirs, recursive)?;
         let parsed = self.parse_documents(&markdown_files)?;
 
@@ -175,12 +176,12 @@ impl AnkiCli {
             .flat_map(|(_, refs)| refs.iter().cloned())
             .collect();
         crate::media::check_media_collisions(&all_media_refs)
-            .map_err(CliError::MediaCollisionError)?;
+            .map_err(|e| anyhow!("Media filename collision: {}", e))?;
 
         Ok((markdown_files, parsed))
     }
 
-    pub fn sync(&self, config: &SyncConfig) -> Result<SyncResult, CliError> {
+    pub fn sync(&self, config: &SyncConfig) -> Result<SyncResult> {
         let (markdown_files, parsed) =
             self.discover_parse_and_validate(&config.source_dirs, config.recursive)?;
 
@@ -197,11 +198,10 @@ impl AnkiCli {
         // Without it, cards would be "synced" to an in-memory fake and then
         // silently discarded — misleading the user into thinking they saved.
         #[cfg(not(feature = "real-anki"))]
-        return Err(CliError::AnkiError(
+        bail!(
             "sync requires building with --features real-anki. \
              Use `acli sync --dry-run` or `acli preview` to verify your cards."
-                .to_string(),
-        ));
+        );
 
         #[cfg(feature = "real-anki")]
         {
@@ -209,7 +209,7 @@ impl AnkiCli {
             // DefaultAnkiCollection::new() silently opens an in-memory
             // database and all synced cards are lost when the process exits.
             let collection_path = config.anki_collection_path.as_ref().ok_or_else(|| {
-                CliError::ConfigError(
+                anyhow!(
                     "no Anki collection path configured.\n\
                      Set it in your user config (~/.config/acli/config.toml):\n\
                      \n\
@@ -221,7 +221,6 @@ impl AnkiCli {
                        Windows: %APPDATA%\\Anki2\\User 1\\collection.anki2\n\
                      \n\
                      Or pass --collection <path> on the command line."
-                        .to_string(),
                 )
             })?;
 
@@ -231,15 +230,14 @@ impl AnkiCli {
                 .iter()
                 .any(|(_, refs)| !refs.is_empty());
             if has_media_refs && config.anki_media_dir.is_none() {
-                return Err(CliError::ConfigError(
+                bail!(
                     "cards reference media files but no media_dir is configured.\n\
                      Set it in your user config (~/.config/acli/config.toml):\n\
                      \n\
                      media_dir = \"/path/to/Anki2/User 1/collection.media\"\n\
                      \n\
                      Or pass --media-dir <path> on the command line."
-                        .to_string(),
-                ));
+                );
             }
 
             // Copy media files if anki_media_dir is configured
@@ -263,10 +261,10 @@ impl AnkiCli {
             let sync_counts = {
                 use anki_wrapper::DefaultAnkiCollection;
                 let collection = DefaultAnkiCollection::open_collection_path(collection_path)
-                    .map_err(|e| CliError::AnkiError(e.to_string()))?;
+                    .map_err(|e| anyhow!("Failed to open Anki collection: {}", e))?;
                 let mut adapter = AnkiCollectionAdapter::new(collection);
                 sync_incremental(&parsed.cards, &config.deck_name, &mut adapter)
-                    .map_err(|e| CliError::ExecutionError(e.to_string()))?
+                    .map_err(|e| anyhow!("Sync execution error: {}", e))?
             };
 
             let mut result = SyncResult::new(
@@ -286,7 +284,7 @@ impl AnkiCli {
     }
 
     /// Parse all markdown files and return the cards that would be synced.
-    pub fn preview(&self, config: &SyncConfig) -> Result<PreviewResult, CliError> {
+    pub fn preview(&self, config: &SyncConfig) -> Result<PreviewResult> {
         let (markdown_files, parsed) =
             self.discover_parse_and_validate(&config.source_dirs, config.recursive)?;
 
@@ -297,7 +295,7 @@ impl AnkiCli {
         })
     }
 
-    pub fn validate(&self, config: &ValidationConfig) -> Result<ValidationResult, CliError> {
+    pub fn validate(&self, config: &ValidationConfig) -> Result<ValidationResult> {
         let markdown_files = self.discover_files(&config.source_dirs, config.recursive)?;
         let parsed = self.parse_documents(&markdown_files)?;
         Ok(ValidationResult {
@@ -310,7 +308,7 @@ impl AnkiCli {
         &self,
         sources: &[PathBuf],
         recursive: bool,
-    ) -> Result<Vec<PathBuf>, CliError> {
+    ) -> Result<Vec<PathBuf>> {
         discovery::discover_markdown_files(sources, recursive)
     }
 
@@ -318,7 +316,7 @@ impl AnkiCli {
         discovery::is_markdown_file(path)
     }
 
-    fn parse_documents(&self, files: &[PathBuf]) -> Result<ParsedBatch, CliError> {
+    fn parse_documents(&self, files: &[PathBuf]) -> Result<ParsedBatch> {
         let mut cards = Vec::new();
         let mut files_with_cards: usize = 0;
         let mut media_with_dirs = Vec::new();
@@ -342,7 +340,7 @@ impl AnkiCli {
                 // Files with no cards are silently skipped
                 Err(doc_parser::ParseError::EmptyDocument) => continue,
                 Err(e) => {
-                    return Err(CliError::ParseError(format!("{}: {}", path.display(), e)));
+                    return Err(anyhow!("Parse error: {}: {}", path.display(), e));
                 }
             }
         }
