@@ -1,11 +1,11 @@
 ---
 # acli-zbdz
 title: 'Remove dead code: ParsedBatch::source_files field'
-status: todo
+status: completed
 type: task
 priority: low
 created_at: 2026-03-25T13:59:04Z
-updated_at: 2026-03-25T14:17:39Z
+updated_at: 2026-03-28T18:37:10Z
 parent: acli-mw5z
 ---
 

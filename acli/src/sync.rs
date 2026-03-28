@@ -302,7 +302,7 @@ impl AnkiCli {
         let parsed = self.parse_documents(&markdown_files)?;
         Ok(ValidationResult {
             total_files: markdown_files.len(),
-            files_with_cards: parsed.source_files.len(),
+            files_with_cards: parsed.files_with_cards,
         })
     }
 
@@ -320,7 +320,7 @@ impl AnkiCli {
 
     fn parse_documents(&self, files: &[PathBuf]) -> Result<ParsedBatch, CliError> {
         let mut cards = Vec::new();
-        let mut source_files = Vec::new();
+        let mut files_with_cards: usize = 0;
         let mut media_with_dirs = Vec::new();
 
         for path in files {
@@ -333,7 +333,7 @@ impl AnkiCli {
                     }
 
                     cards.extend(parsed.cards);
-                    source_files.push(path.display().to_string());
+                    files_with_cards += 1;
 
                     // Collect media refs with the document's parent directory
                     let doc_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -349,7 +349,7 @@ impl AnkiCli {
 
         Ok(ParsedBatch {
             cards,
-            source_files,
+            files_with_cards,
             media_with_dirs,
         })
     }
@@ -406,8 +406,7 @@ pub fn sync_incremental<C: AnkiWrapperCollection>(
 
 struct ParsedBatch {
     cards: Vec<Card>,
-    #[allow(dead_code)]
-    source_files: Vec<String>,
+    files_with_cards: usize,
     /// Per-document (document_dir, media_refs) pairs.
     media_with_dirs: Vec<(PathBuf, Vec<MediaReference>)>,
 }
