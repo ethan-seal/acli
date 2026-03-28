@@ -395,53 +395,58 @@ impl AnkiCollection for DefaultAnkiCollection {
         let mut seen_notes = HashSet::new();
 
         for anki_card_id in card_ids {
-            if let Some(anki_card) = self
+            let anki_card = match self
                 .collection
                 .storage
                 .get_card(anki_card_id)
                 .map_err(|e| AnkiWrapperError::AnkiError(format!("Failed to get card: {}", e)))?
             {
-                // Deduplicate by note: only emit one CardInfo per note.
-                // A "Basic (and reversed card)" note produces two Anki cards
-                // but represents a single user-authored card.
-                if !seen_notes.insert(anki_card.note_id()) {
-                    continue;
-                }
+                Some(c) => c,
+                None => continue,
+            };
 
-                // Get the note to access fields
-                if let Some(note) = self
-                    .collection
-                    .storage
-                    .get_note(anki_card.note_id())
-                    .map_err(|e| {
-                        AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e))
-                    })?
-                {
-                    // Determine card type based on note type name
-                    let notetype = self
-                        .collection
-                        .get_notetype(note.notetype_id)
-                        .map_err(|e| {
-                            AnkiWrapperError::AnkiError(format!("Failed to get notetype: {}", e))
-                        })?
-                        .ok_or_else(|| {
-                            AnkiWrapperError::AnkiError("Notetype not found".to_string())
-                        })?;
-
-                    let card_type = if notetype.name == "Basic (and reversed card)" {
-                        crate::types::CardType::BasicReversed
-                    } else {
-                        crate::types::CardType::Basic
-                    };
-
-                    result.push(CardInfo {
-                        id: CardId(anki_card_id.0),
-                        note_id: NoteId(anki_card.note_id().0),
-                        card_type,
-                        fields: note.fields().clone(),
-                    });
-                }
+            // Deduplicate by note: only emit one CardInfo per note.
+            // A "Basic (and reversed card)" note produces two Anki cards
+            // but represents a single user-authored card.
+            if !seen_notes.insert(anki_card.note_id()) {
+                continue;
             }
+
+            let note = match self
+                .collection
+                .storage
+                .get_note(anki_card.note_id())
+                .map_err(|e| {
+                    AnkiWrapperError::AnkiError(format!("Failed to get note: {}", e))
+                })?
+            {
+                Some(n) => n,
+                None => continue,
+            };
+
+            // Determine card type based on note type name
+            let notetype = self
+                .collection
+                .get_notetype(note.notetype_id)
+                .map_err(|e| {
+                    AnkiWrapperError::AnkiError(format!("Failed to get notetype: {}", e))
+                })?
+                .ok_or_else(|| {
+                    AnkiWrapperError::AnkiError("Notetype not found".to_string())
+                })?;
+
+            let card_type = if notetype.name == "Basic (and reversed card)" {
+                crate::types::CardType::BasicReversed
+            } else {
+                crate::types::CardType::Basic
+            };
+
+            result.push(CardInfo {
+                id: CardId(anki_card_id.0),
+                note_id: NoteId(anki_card.note_id().0),
+                card_type,
+                fields: note.fields().clone(),
+            });
         }
 
         Ok(result)
